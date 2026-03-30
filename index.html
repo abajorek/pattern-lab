@@ -661,8 +661,8 @@
   function resizeCanvases() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    procCanvas.width = 480;
-    procCanvas.height = 360;
+    procCanvas.width = 640;
+    procCanvas.height = 480;
     drawCanvas.width = w * devicePixelRatio;
     drawCanvas.height = h * devicePixelRatio;
     drawCanvas.style.width = w + 'px';
@@ -822,12 +822,12 @@
 
   // --- Tracking algorithm: color similarity + proximity + motion weighting ---
 
-  function colorDistance(r1, g1, b1, r2, g2, b2) {
-    // Weighted Euclidean distance in RGB space
+  function colorDistSq(r1, g1, b1, r2, g2, b2) {
+    // Weighted squared distance in RGB space (no sqrt for speed)
     const dr = r1 - r2;
     const dg = g1 - g2;
     const db = b1 - b2;
-    return Math.sqrt(dr * dr * 2 + dg * dg * 4 + db * db * 3);
+    return dr * dr * 2 + dg * dg * 4 + db * db * 3;
   }
 
   function findTrackedPoint() {
@@ -843,23 +843,24 @@
     const tolerance = sensitivitySlider.value;
     // Map to a color distance threshold: strict=30, loose=150
     const maxColorDist = 30 + tolerance * 1.2;
+    const maxColorDistSq = maxColorDist * maxColorDist;
 
     // Proximity search radius — expand if we've lost the target
-    const proximityWeight = lastKnownPos ? 1.0 : 0.0;
-    const searchExpand = Math.min(framesLost * 5, 100); // expand search area over time
+    const hasLastPos = lastKnownPos !== null;
+    const searchExpand = Math.min(framesLost * 8, 200);
 
-    // Build motion map from frame differencing
+    // Build motion map from frame differencing (at half resolution for speed)
     let motionMap = null;
     if (prevFrameData && prevFrameData.length === data.length) {
-      motionMap = new Float32Array(pw * ph);
+      motionMap = new Float32Array((pw >> 1) * (ph >> 1));
+      const mw = pw >> 1;
       for (let y = 0; y < ph; y += 2) {
         for (let x = 0; x < pw; x += 2) {
           const i = (y * pw + x) * 4;
           const dr = data[i] - prevFrameData[i];
           const dg = data[i + 1] - prevFrameData[i + 1];
           const db = data[i + 2] - prevFrameData[i + 2];
-          const motion = Math.sqrt(dr * dr + dg * dg + db * db);
-          motionMap[y * pw + x] = motion;
+          motionMap[(y >> 1) * mw + (x >> 1)] = dr * dr + dg * dg + db * db;
         }
       }
     }
@@ -869,43 +870,59 @@
     let sumX = 0, sumY = 0, sumWeight = 0;
 
     const tR = targetColor.r, tG = targetColor.g, tB = targetColor.b;
+    const mw = pw >> 1;
+    const motionThreshSq = 225; // 15^2
 
-    // Scan every pixel for reliable detection at distance
-    for (let y = 0; y < ph; y++) {
-      for (let x = 0; x < pw; x++) {
+    // Two-pass strategy: if we have a last known position, search a focused
+    // region first. If that fails, fall back to full-frame scan.
+    // Focused region is much faster and more accurate.
+    let scanYMin = 0, scanYMax = ph, scanXMin = 0, scanXMax = pw;
+    let focusedSearch = false;
+
+    if (hasLastPos && framesLost < 10) {
+      const r = 120 + searchExpand;
+      scanYMin = Math.max(0, Math.floor(lastKnownPos.y - r));
+      scanYMax = Math.min(ph, Math.ceil(lastKnownPos.y + r));
+      scanXMin = Math.max(0, Math.floor(lastKnownPos.x - r));
+      scanXMax = Math.min(pw, Math.ceil(lastKnownPos.x + r));
+      focusedSearch = true;
+    }
+
+    for (let y = scanYMin; y < scanYMax; y++) {
+      for (let x = scanXMin; x < scanXMax; x++) {
         const i = (y * pw + x) * 4;
         const r = data[i], g = data[i + 1], b = data[i + 2];
 
-        const cDist = colorDistance(r, g, b, tR, tG, tB);
-        if (cDist > maxColorDist) continue;
+        const cDistSq = colorDistSq(r, g, b, tR, tG, tB);
+        if (cDistSq > maxColorDistSq) continue;
 
-        // Color similarity weight (closer color = higher weight)
-        const colorWeight = 1.0 - (cDist / maxColorDist);
+        // Color similarity weight
+        const colorWeight = 1.0 - Math.sqrt(cDistSq) / maxColorDist;
 
-        // Proximity weight (closer to last known position = higher weight)
+        // Proximity weight
         let proxWeight = 1.0;
-        if (lastKnownPos && proximityWeight > 0) {
+        if (hasLastPos) {
           const dx = x - lastKnownPos.x;
           const dy = y - lastKnownPos.y;
-          const pixDist = Math.sqrt(dx * dx + dy * dy);
-          // Soft falloff: within ~90px is full weight, then falls off
-          const radius = 90 + searchExpand;
-          proxWeight = Math.max(0.05, 1.0 - (pixDist / radius) * 0.8);
+          const pixDistSq = dx * dx + dy * dy;
+          const radius = 120 + searchExpand;
+          const radiusSq = radius * radius;
+          if (pixDistSq < radiusSq) {
+            proxWeight = 1.0 - Math.sqrt(pixDistSq) / radius * 0.7;
+          } else {
+            proxWeight = 0.05;
+          }
         }
 
-        // Motion weight: moving pixels get a significant boost
-        // This helps distinguish the baton (moving fast) from static same-colored objects
+        // Motion weight from half-res motion map
         let motionWeight = 1.0;
         if (motionMap) {
-          // Motion map is at step-2, snap to nearest sampled pixel
-          const mx = (x & ~1), my = (y & ~1);
-          const m = motionMap[my * pw + mx];
-          // Pixels with motion > 15 get boosted, static pixels get penalized
-          // Threshold 15 ignores camera noise; scale tapers off at ~80
-          if (m > 15) {
-            motionWeight = 1.0 + Math.min((m - 15) / 65, 2.0); // up to 3x boost
+          const mSq = motionMap[(y >> 1) * mw + (x >> 1)];
+          if (mSq > motionThreshSq) {
+            const m = Math.sqrt(mSq);
+            motionWeight = 1.0 + Math.min((m - 15) / 65, 2.0);
           } else {
-            motionWeight = 0.3; // static pixels heavily penalized
+            motionWeight = 0.3;
           }
         }
 
@@ -913,6 +930,22 @@
         sumX += x * weight;
         sumY += y * weight;
         sumWeight += weight;
+      }
+    }
+
+    // If focused search found nothing, try full frame
+    if (focusedSearch && sumWeight < 0.1) {
+      for (let y = 0; y < ph; y += 2) {
+        for (let x = 0; x < pw; x += 2) {
+          const i = (y * pw + x) * 4;
+          const r = data[i], g = data[i + 1], b = data[i + 2];
+          const cDistSq = colorDistSq(r, g, b, tR, tG, tB);
+          if (cDistSq > maxColorDistSq) continue;
+          const colorWeight = 1.0 - Math.sqrt(cDistSq) / maxColorDist;
+          sumX += x * colorWeight;
+          sumY += y * colorWeight;
+          sumWeight += colorWeight;
+        }
       }
     }
 
@@ -928,16 +961,16 @@
         const ddy = cy - lastKnownPos.y;
         const dist = Math.sqrt(ddx * ddx + ddy * ddy);
 
-        if (dist < 3.0) {
-          // Barely moved — keep old position (kills jitter when stationary)
-        } else if (dist < 9.0) {
-          // Small movement — heavy smoothing
-          lastKnownPos.x = cx * 0.25 + lastKnownPos.x * 0.75;
-          lastKnownPos.y = cy * 0.25 + lastKnownPos.y * 0.75;
+        if (dist < 1.2) {
+          // Sub-pixel noise — keep old position
+        } else if (dist < 4.0) {
+          // Small movement — smooth but still track
+          lastKnownPos.x = cx * 0.4 + lastKnownPos.x * 0.6;
+          lastKnownPos.y = cy * 0.4 + lastKnownPos.y * 0.6;
         } else {
-          // Real movement — moderate smoothing
-          lastKnownPos.x = cx * 0.5 + lastKnownPos.x * 0.5;
-          lastKnownPos.y = cy * 0.5 + lastKnownPos.y * 0.5;
+          // Real movement — light smoothing to stay faithful
+          lastKnownPos.x = cx * 0.65 + lastKnownPos.x * 0.35;
+          lastKnownPos.y = cy * 0.65 + lastKnownPos.y * 0.35;
         }
       } else {
         lastKnownPos = { x: cx, y: cy };
