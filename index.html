@@ -269,6 +269,98 @@
     font-weight: 400;
   }
 
+  #toleranceValue {
+    font-size: 0.75rem;
+    color: #b0aab8;
+    font-weight: 600;
+    min-width: 1.8rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Countdown overlay */
+  #countdownOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  #countdownOverlay.visible {
+    display: flex;
+  }
+
+  #countdownNumber {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(4rem, 15vw, 8rem);
+    font-weight: 900;
+    color: rgba(74, 222, 128, 0.9);
+    text-shadow: 0 0 40px rgba(74, 222, 128, 0.4);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+
+  #countdownHint {
+    font-size: 0.95rem;
+    color: #b0aab8;
+    margin-top: 0.5rem;
+  }
+
+  /* Crosshair for countdown auto-lock */
+  #crosshair {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 26;
+    width: 60px;
+    height: 60px;
+    display: none;
+  }
+
+  #crosshair.visible {
+    display: block;
+  }
+
+  #crosshair::before,
+  #crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(74, 222, 128, 0.8);
+  }
+
+  #crosshair::before {
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 2px;
+    transform: translateY(-50%);
+  }
+
+  #crosshair::after {
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    transform: translateX(-50%);
+  }
+
+  .crosshair-ring {
+    position: absolute;
+    inset: 5px;
+    border: 2px solid rgba(74, 222, 128, 0.6);
+    border-radius: 50%;
+    animation: pulse-crosshair 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-crosshair {
+    0%, 100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.15); opacity: 0.4; }
+  }
+
   #sensitivitySlider {
     -webkit-appearance: none;
     appearance: none;
@@ -398,6 +490,7 @@
 <div id="controls">
   <div class="control-row">
     <button class="ctrl-btn select-btn" id="selectBtn">Select Tip</button>
+    <button class="ctrl-btn select-btn" id="remoteSelectBtn">Remote Select</button>
     <button class="ctrl-btn" id="colorBtn" data-color="0">&#x1F7E0; Warm</button>
     <button class="ctrl-btn" id="trailBtn" data-trail="0">Trail: Long</button>
     <button class="ctrl-btn" id="cameraToggleBtn">&#x1F504; Flip Camera</button>
@@ -407,8 +500,16 @@
     <span id="colorSwatch"></span>
     <label>Tolerance</label>
     <input type="range" id="sensitivitySlider" min="0" max="100" value="50">
+    <span id="toleranceValue">50</span>
   </div>
 </div>
+
+<div id="countdownOverlay">
+  <div id="countdownNumber">5</div>
+  <div id="countdownHint">Hold baton tip on the crosshair</div>
+</div>
+
+<div id="crosshair"><div class="crosshair-ring"></div></div>
 
 <div id="errorMsg">
   <h3>Camera Needed</h3>
@@ -431,6 +532,8 @@
   let targetColor = null;       // { r, g, b } of the selected baton tip
   let lastKnownPos = null;      // { x, y } in processing canvas coords for proximity weighting
   let framesLost = 0;           // how many frames since we last saw the target
+  let prevFrameData = null;     // previous frame pixel data for motion detection
+  let countdownActive = false;  // true during remote select countdown
 
   // Color palettes
   const palettes = [
@@ -465,6 +568,11 @@
   const selectBtn = document.getElementById('selectBtn');
   const selectOverlay = document.getElementById('selectOverlay');
   const colorSwatch = document.getElementById('colorSwatch');
+  const toleranceValue = document.getElementById('toleranceValue');
+  const remoteSelectBtn = document.getElementById('remoteSelectBtn');
+  const countdownOverlay = document.getElementById('countdownOverlay');
+  const countdownNumber = document.getElementById('countdownNumber');
+  const crosshair = document.getElementById('crosshair');
 
   const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
   const drawCtx = drawCanvas.getContext('2d');
@@ -541,6 +649,11 @@
     drawCanvas.style.height = h + 'px';
     drawCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   }
+
+  // Tolerance readout
+  sensitivitySlider.addEventListener('input', () => {
+    toleranceValue.textContent = sensitivitySlider.value;
+  });
 
   // --- Selection mode ---
 
@@ -646,7 +759,75 @@
     drawCanvas.dispatchEvent(clickEvent);
   });
 
-  // --- Tracking algorithm: color similarity + proximity ---
+  // --- Remote Select: countdown + crosshair auto-lock ---
+
+  remoteSelectBtn.addEventListener('click', () => {
+    if (countdownActive) return;
+    countdownActive = true;
+    remoteSelectBtn.classList.add('active');
+    countdownOverlay.classList.add('visible');
+    crosshair.classList.add('visible');
+    trackingDot.classList.add('selecting');
+    trackingLabel.textContent = 'Get in position...';
+
+    let secondsLeft = 5;
+    countdownNumber.textContent = secondsLeft;
+
+    const ticker = setInterval(() => {
+      secondsLeft--;
+      if (secondsLeft > 0) {
+        countdownNumber.textContent = secondsLeft;
+      } else {
+        clearInterval(ticker);
+        // Auto-lock: sample the center of the screen (where crosshair is)
+        const pw = procCanvas.width;
+        const ph = procCanvas.height;
+        const cx = Math.round(pw / 2);
+        const cy = Math.round(ph / 2);
+
+        procCtx.drawImage(video, 0, 0, pw, ph);
+        const imageData = procCtx.getImageData(0, 0, pw, ph);
+        const data = imageData.data;
+
+        let sumR = 0, sumG = 0, sumB = 0, count = 0;
+        const sampleRadius = 5;
+        for (let dy = -sampleRadius; dy <= sampleRadius; dy++) {
+          for (let dx = -sampleRadius; dx <= sampleRadius; dx++) {
+            const sx = cx + dx;
+            const sy = cy + dy;
+            if (sx < 0 || sx >= pw || sy < 0 || sy >= ph) continue;
+            const i = (sy * pw + sx) * 4;
+            sumR += data[i];
+            sumG += data[i + 1];
+            sumB += data[i + 2];
+            count++;
+          }
+        }
+
+        if (count > 0) {
+          targetColor = {
+            r: Math.round(sumR / count),
+            g: Math.round(sumG / count),
+            b: Math.round(sumB / count)
+          };
+          lastKnownPos = { x: cx, y: cy };
+          framesLost = 0;
+          colorSwatch.style.background = 'rgb(' + targetColor.r + ',' + targetColor.g + ',' + targetColor.b + ')';
+          trackingLabel.textContent = 'Locked on — tracking';
+          trackingDot.classList.remove('selecting');
+          trackingDot.classList.add('tracking');
+          points = [];
+        }
+
+        countdownOverlay.classList.remove('visible');
+        crosshair.classList.remove('visible');
+        remoteSelectBtn.classList.remove('active');
+        countdownActive = false;
+      }
+    }, 1000);
+  });
+
+  // --- Tracking algorithm: color similarity + proximity + motion weighting ---
 
   function colorDistance(r1, g1, b1, r2, g2, b2) {
     // Weighted Euclidean distance in RGB space
@@ -674,7 +855,24 @@
     const proximityWeight = lastKnownPos ? 1.0 : 0.0;
     const searchExpand = Math.min(framesLost * 5, 100); // expand search area over time
 
-    let bestScore = Infinity;
+    // Build motion map from frame differencing
+    let motionMap = null;
+    if (prevFrameData && prevFrameData.length === data.length) {
+      motionMap = new Float32Array(pw * ph);
+      for (let y = 0; y < ph; y += 2) {
+        for (let x = 0; x < pw; x += 2) {
+          const i = (y * pw + x) * 4;
+          const dr = data[i] - prevFrameData[i];
+          const dg = data[i + 1] - prevFrameData[i + 1];
+          const db = data[i + 2] - prevFrameData[i + 2];
+          const motion = Math.sqrt(dr * dr + dg * dg + db * db);
+          motionMap[y * pw + x] = motion;
+        }
+      }
+    }
+    // Store current frame for next comparison
+    prevFrameData = new Uint8ClampedArray(data);
+
     let sumX = 0, sumY = 0, sumWeight = 0;
 
     const tR = targetColor.r, tG = targetColor.g, tB = targetColor.b;
@@ -701,7 +899,21 @@
           proxWeight = Math.max(0.05, 1.0 - (pixDist / radius) * 0.8);
         }
 
-        const weight = colorWeight * proxWeight;
+        // Motion weight: moving pixels get a significant boost
+        // This helps distinguish the baton (moving fast) from static same-colored objects
+        let motionWeight = 1.0;
+        if (motionMap) {
+          const m = motionMap[y * pw + x];
+          // Pixels with motion > 15 get boosted, static pixels get penalized
+          // Threshold 15 ignores camera noise; scale tapers off at ~80
+          if (m > 15) {
+            motionWeight = 1.0 + Math.min((m - 15) / 65, 2.0); // up to 3x boost
+          } else {
+            motionWeight = 0.3; // static pixels heavily penalized
+          }
+        }
+
+        const weight = colorWeight * proxWeight * motionWeight;
         sumX += x * weight;
         sumY += y * weight;
         sumWeight += weight;
@@ -740,7 +952,7 @@
 
   // Main loop
   function loop() {
-    if (!selectMode) {
+    if (!selectMode && !countdownActive) {
       const result = findTrackedPoint();
 
       if (result) {
@@ -871,6 +1083,7 @@
     targetColor = null;
     lastKnownPos = null;
     framesLost = 0;
+    prevFrameData = null;
     colorSwatch.style.background = '#555';
     trackingLabel.textContent = 'Tap "Select Tip" to begin';
     trackingDot.classList.remove('tracking');
