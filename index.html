@@ -444,6 +444,7 @@
     <button class="ctrl-btn" id="colorBtn" data-color="0">&#x1F7E0; Warm</button>
     <button class="ctrl-btn" id="trailBtn" data-trail="0">Trail: Long</button>
     <button class="ctrl-btn" id="cameraToggleBtn">&#x1F504; Flip Camera</button>
+    <button class="ctrl-btn" id="soundBtn">Sound: On</button>
     <button class="ctrl-btn clear-btn" id="clearBtn">Clear</button>
   </div>
   <div class="sensitivity-row">
@@ -484,6 +485,15 @@
   let prevFrameData = null;     // previous frame pixel data for motion detection
   let countdownActive = false;  // true during remote select countdown
 
+  // Direction change / beat detection state
+  let audioCtx = null;
+  let soundEnabled = true;
+  let prevVelY = 0;             // previous Y velocity for direction detection
+  let prevScreenPos = null;     // previous screen position { x, y, time }
+  let lastBeatTime = 0;         // timestamp of last beat sound (cooldown)
+  const BEAT_COOLDOWN_MS = 120; // minimum ms between beat clicks
+  const VEL_THRESHOLD = 1.5;    // minimum velocity magnitude to count as intentional motion
+
   // Color palettes
   const palettes = [
     { name: 'Warm',  label: '\u{1F7E0} Warm',  colors: ['#fc5c7d','#f0c27f','#ff6b6b','#ffd93d'] },
@@ -520,6 +530,7 @@
   const countdownOverlay = document.getElementById('countdownOverlay');
   const countdownNumber = document.getElementById('countdownNumber');
   const crosshair = document.getElementById('crosshair');
+  const soundBtn = document.getElementById('soundBtn');
 
   const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
   const drawCtx = drawCanvas.getContext('2d');
@@ -567,6 +578,7 @@
   // Start
   startBtn.addEventListener('click', async () => {
     try {
+      ensureAudioCtx();
       await startCamera();
 
       startScreen.classList.add('hidden');
@@ -674,6 +686,70 @@
       }
     }, 1000);
   });
+
+  // --- Beat sound engine (Web Audio API) ---
+
+  function ensureAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playBeatClick(isDownbeat) {
+    if (!soundEnabled || !audioCtx) return;
+    const now = audioCtx.currentTime;
+
+    // Short percussive click — higher pitch for downbeat
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(isDownbeat ? 900 : 600, now);
+    osc.frequency.exponentialRampToValueAtTime(isDownbeat ? 450 : 300, now + 0.06);
+
+    gain.gain.setValueAtTime(isDownbeat ? 0.35 : 0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
+  function checkDirectionChange(screenX, screenY) {
+    const now = performance.now();
+
+    if (!prevScreenPos) {
+      prevScreenPos = { x: screenX, y: screenY, time: now };
+      return;
+    }
+
+    const dt = now - prevScreenPos.time;
+    if (dt < 8) return; // skip if frames are too close
+
+    // Compute velocity (pixels per frame-interval, normalized)
+    const velY = (screenY - prevScreenPos.y) / dt * 16; // normalize to ~60fps
+
+    // Detect Y direction reversal (the ictus — where the baton bounces)
+    // Only trigger if both old and new velocity have meaningful magnitude
+    if (Math.abs(velY) > VEL_THRESHOLD && Math.abs(prevVelY) > VEL_THRESHOLD) {
+      if ((prevVelY > 0 && velY < 0) || (prevVelY < 0 && velY > 0)) {
+        // Direction changed — check cooldown
+        if (now - lastBeatTime > BEAT_COOLDOWN_MS) {
+          // Downbeat = was going down (positive Y), now going up
+          const isDownbeat = prevVelY > 0 && velY < 0;
+          playBeatClick(isDownbeat);
+          lastBeatTime = now;
+        }
+      }
+    }
+
+    prevVelY = velY;
+    prevScreenPos = { x: screenX, y: screenY, time: now };
+  }
 
   // --- Tracking algorithm: color similarity + proximity + motion weighting ---
 
@@ -808,6 +884,9 @@
         trackingDot.classList.add('tracking');
         trackingLabel.textContent = 'Tracking';
 
+        // Check for direction change and play beat click
+        checkDirectionChange(result.x, result.y);
+
         points.push({
           x: result.x,
           y: result.y,
@@ -819,6 +898,9 @@
           isTracking = false;
           trackingDot.classList.remove('tracking');
           trackingLabel.textContent = framesLost > 30 ? 'Lost target — try re-selecting' : 'Searching...';
+          // Reset beat detection so we don't get a false trigger on re-acquire
+          prevScreenPos = null;
+          prevVelY = 0;
         }
 
         if (points.length > 0 && points[points.length - 1] !== null) {
@@ -918,6 +1000,11 @@
   trailBtn.addEventListener('click', () => {
     trailMode = (trailMode + 1) % trailSettings.length;
     trailBtn.textContent = trailSettings[trailMode].label;
+  });
+
+  soundBtn.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    soundBtn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
   });
 
   clearBtn.addEventListener('click', () => {
