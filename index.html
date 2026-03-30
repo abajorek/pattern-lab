@@ -134,11 +134,6 @@
     pointer-events: none;
   }
 
-  #drawCanvas.selecting {
-    pointer-events: auto;
-    cursor: crosshair;
-  }
-
   #controls {
     position: absolute;
     bottom: 0;
@@ -312,8 +307,8 @@
   /* Crosshair for countdown auto-lock */
   #crosshair {
     position: absolute;
-    top: 50%;
-    left: 50%;
+    top: 70%;
+    left: 70%;
     transform: translate(-50%, -50%);
     z-index: 26;
     width: 60px;
@@ -390,43 +385,6 @@
     background: #555;
   }
 
-  /* Selection overlay hint */
-  #selectOverlay {
-    position: absolute;
-    inset: 0;
-    z-index: 15;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
-
-  #selectOverlay.visible {
-    display: flex;
-  }
-
-  #selectOverlay .hint {
-    background: rgba(10,10,15,0.85);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(74, 222, 128, 0.4);
-    border-radius: 12px;
-    padding: 1rem 1.5rem;
-    text-align: center;
-    color: #e8e4df;
-    font-size: 0.95rem;
-    max-width: 280px;
-    animation: fadeInUp 0.3s ease;
-  }
-
-  #selectOverlay .hint strong {
-    color: #4ade80;
-  }
-
-  @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
   #errorMsg {
     position: absolute;
     top: 50%;
@@ -462,7 +420,7 @@
   <p class="subtitle">Conducting Pattern Tracker</p>
   <ol class="instructions">
     <li data-num="1">Hold your baton (or any object) in front of the camera</li>
-    <li data-num="2">Tap <strong>Select Tip</strong> and then tap the baton tip on screen to lock onto it</li>
+    <li data-num="2">Tap <strong>Select Tip</strong>, then hold the baton tip on the crosshair during the countdown</li>
     <li data-num="3">Conduct! The app tracks the tip and draws your pattern</li>
     <li data-num="4">Trails fade over time so you can see the shape of your gesture</li>
   </ol>
@@ -475,13 +433,6 @@
   <canvas id="drawCanvas"></canvas>
 </div>
 
-<div id="selectOverlay">
-  <div class="hint">
-    <strong>Tap the baton tip</strong> in the video to lock on.<br>
-    The tracker will follow that color.
-  </div>
-</div>
-
 <div id="trackingIndicator">
   <div id="trackingDot"></div>
   <span id="trackingLabel">Tap "Select Tip" to begin</span>
@@ -490,7 +441,6 @@
 <div id="controls">
   <div class="control-row">
     <button class="ctrl-btn select-btn" id="selectBtn">Select Tip</button>
-    <button class="ctrl-btn select-btn" id="remoteSelectBtn">Remote Select</button>
     <button class="ctrl-btn" id="colorBtn" data-color="0">&#x1F7E0; Warm</button>
     <button class="ctrl-btn" id="trailBtn" data-trail="0">Trail: Long</button>
     <button class="ctrl-btn" id="cameraToggleBtn">&#x1F504; Flip Camera</button>
@@ -528,7 +478,6 @@
   let useFrontCamera = false;
 
   // Baton tip tracking state
-  let selectMode = false;       // true when waiting for user to tap baton tip
   let targetColor = null;       // { r, g, b } of the selected baton tip
   let lastKnownPos = null;      // { x, y } in processing canvas coords for proximity weighting
   let framesLost = 0;           // how many frames since we last saw the target
@@ -566,10 +515,8 @@
   const sensitivitySlider = document.getElementById('sensitivitySlider');
   const errorMsg = document.getElementById('errorMsg');
   const selectBtn = document.getElementById('selectBtn');
-  const selectOverlay = document.getElementById('selectOverlay');
   const colorSwatch = document.getElementById('colorSwatch');
   const toleranceValue = document.getElementById('toleranceValue');
-  const remoteSelectBtn = document.getElementById('remoteSelectBtn');
   const countdownOverlay = document.getElementById('countdownOverlay');
   const countdownNumber = document.getElementById('countdownNumber');
   const crosshair = document.getElementById('crosshair');
@@ -655,118 +602,15 @@
     toleranceValue.textContent = sensitivitySlider.value;
   });
 
-  // --- Selection mode ---
-
-  function enterSelectMode() {
-    selectMode = true;
-    targetColor = null;
-    lastKnownPos = null;
-    framesLost = 0;
-    drawCanvas.classList.add('selecting');
-    selectBtn.classList.add('active');
-    selectOverlay.classList.add('visible');
-    trackingDot.classList.remove('tracking');
-    trackingDot.classList.add('selecting');
-    trackingLabel.textContent = 'Tap the baton tip...';
-  }
-
-  function exitSelectMode() {
-    selectMode = false;
-    drawCanvas.classList.remove('selecting');
-    selectBtn.classList.remove('active');
-    selectOverlay.classList.remove('visible');
-    trackingDot.classList.remove('selecting');
-  }
+  // --- Select Tip: countdown + crosshair auto-lock ---
 
   selectBtn.addEventListener('click', () => {
-    if (selectMode) {
-      exitSelectMode();
-      if (!targetColor) {
-        trackingLabel.textContent = 'Tap "Select Tip" to begin';
-      }
-    } else {
-      enterSelectMode();
-    }
-  });
-
-  // Handle tap on canvas to select baton tip color
-  drawCanvas.addEventListener('click', (e) => {
-    if (!selectMode) return;
-
-    const rect = drawCanvas.getBoundingClientRect();
-    let tapX = (e.clientX - rect.left) / rect.width;
-    let tapY = (e.clientY - rect.top) / rect.height;
-
-    // If front camera is mirrored, flip the tap X to match unmirrored processing canvas
-    if (useFrontCamera) {
-      tapX = 1 - tapX;
-    }
-
-    // Map to processing canvas coords
-    const pw = procCanvas.width;
-    const ph = procCanvas.height;
-    const px = Math.round(tapX * pw);
-    const py = Math.round(tapY * ph);
-
-    // Draw current frame to processing canvas and sample color
-    procCtx.drawImage(video, 0, 0, pw, ph);
-    const imageData = procCtx.getImageData(0, 0, pw, ph);
-    const data = imageData.data;
-
-    // Sample a small region around the tap point (5x5) for a stable average
-    let sumR = 0, sumG = 0, sumB = 0, count = 0;
-    const sampleRadius = 3;
-    for (let dy = -sampleRadius; dy <= sampleRadius; dy++) {
-      for (let dx = -sampleRadius; dx <= sampleRadius; dx++) {
-        const sx = px + dx;
-        const sy = py + dy;
-        if (sx < 0 || sx >= pw || sy < 0 || sy >= ph) continue;
-        const i = (sy * pw + sx) * 4;
-        sumR += data[i];
-        sumG += data[i + 1];
-        sumB += data[i + 2];
-        count++;
-      }
-    }
-
-    if (count > 0) {
-      targetColor = {
-        r: Math.round(sumR / count),
-        g: Math.round(sumG / count),
-        b: Math.round(sumB / count)
-      };
-      lastKnownPos = { x: px, y: py };
-      framesLost = 0;
-
-      // Update swatch
-      colorSwatch.style.background = 'rgb(' + targetColor.r + ',' + targetColor.g + ',' + targetColor.b + ')';
-
-      exitSelectMode();
-      trackingLabel.textContent = 'Locked on — tracking';
-      points = []; // clear old trails
-    }
-  });
-
-  // Also support touch
-  drawCanvas.addEventListener('touchend', (e) => {
-    if (!selectMode) return;
-    e.preventDefault();
-    const touch = e.changedTouches[0];
-    const clickEvent = new MouseEvent('click', {
-      clientX: touch.clientX,
-      clientY: touch.clientY
-    });
-    drawCanvas.dispatchEvent(clickEvent);
-  });
-
-  // --- Remote Select: countdown + crosshair auto-lock ---
-
-  remoteSelectBtn.addEventListener('click', () => {
     if (countdownActive) return;
     countdownActive = true;
-    remoteSelectBtn.classList.add('active');
+    selectBtn.classList.add('active');
     countdownOverlay.classList.add('visible');
     crosshair.classList.add('visible');
+    trackingDot.classList.remove('tracking');
     trackingDot.classList.add('selecting');
     trackingLabel.textContent = 'Get in position...';
 
@@ -779,11 +623,15 @@
         countdownNumber.textContent = secondsLeft;
       } else {
         clearInterval(ticker);
-        // Auto-lock: sample the center of the screen (where crosshair is)
+        // Auto-lock: sample at the crosshair position (70% x, 70% y)
         const pw = procCanvas.width;
         const ph = procCanvas.height;
-        const cx = Math.round(pw / 2);
-        const cy = Math.round(ph / 2);
+        // Crosshair is at 70%/70% of screen; map to processing canvas
+        // If front camera, the video is mirrored so flip the X
+        const crosshairScreenX = 0.7;
+        const crosshairScreenY = 0.7;
+        const cx = Math.round((useFrontCamera ? (1 - crosshairScreenX) : crosshairScreenX) * pw);
+        const cy = Math.round(crosshairScreenY * ph);
 
         procCtx.drawImage(video, 0, 0, pw, ph);
         const imageData = procCtx.getImageData(0, 0, pw, ph);
@@ -821,7 +669,7 @@
 
         countdownOverlay.classList.remove('visible');
         crosshair.classList.remove('visible');
-        remoteSelectBtn.classList.remove('active');
+        selectBtn.classList.remove('active');
         countdownActive = false;
       }
     }, 1000);
@@ -952,7 +800,7 @@
 
   // Main loop
   function loop() {
-    if (!selectMode && !countdownActive) {
+    if (!countdownActive) {
       const result = findTrackedPoint();
 
       if (result) {
