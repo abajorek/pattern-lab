@@ -544,7 +544,7 @@
     <button class="ctrl-btn" id="colorBtn" data-color="0">&#x1F7E0; Warm</button>
     <button class="ctrl-btn" id="trailBtn" data-trail="0">Trail: Long</button>
     <button class="ctrl-btn" id="cameraToggleBtn">&#x1F504; Flip Camera</button>
-    <button class="ctrl-btn" id="soundBtn">Sound: On</button>
+    <button class="ctrl-btn" id="soundBtn">Sound: Click</button>
     <button class="ctrl-btn clear-btn" id="clearBtn">Clear</button>
   </div>
   <div class="sensitivity-row">
@@ -595,6 +595,8 @@
   // Direction change / beat detection state
   let audioCtx = null;
   let soundEnabled = true;
+  let soundMode = 0; // 0 = click, 1 = airhorn
+  const soundModes = ['Click', 'Airhorn'];
   let smoothedVelY = 0;         // EMA-smoothed Y velocity
   let prevScreenPos = null;     // previous screen position { x, y, time }
   let lastBeatTime = 0;         // timestamp of last beat sound (cooldown)
@@ -824,9 +826,16 @@
 
   function playBeatClick(isDownbeat) {
     if (!soundEnabled || !audioCtx) return;
-    const now = audioCtx.currentTime;
 
-    // Short percussive click — higher pitch for downbeat
+    if (soundMode === 1) {
+      playAirhorn(isDownbeat);
+    } else {
+      playClick(isDownbeat);
+    }
+  }
+
+  function playClick(isDownbeat) {
+    const now = audioCtx.currentTime;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.connect(gain);
@@ -841,6 +850,53 @@
 
     osc.start(now);
     osc.stop(now + 0.08);
+  }
+
+  function playAirhorn(isDownbeat) {
+    const now = audioCtx.currentTime;
+    const duration = isDownbeat ? 0.25 : 0.15;
+    const vol = isDownbeat ? 0.4 : 0.25;
+
+    // Layer 1: main blare — sawtooth with slight pitch bend
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(isDownbeat ? 520 : 480, now);
+    osc1.frequency.linearRampToValueAtTime(isDownbeat ? 540 : 490, now + duration * 0.3);
+    osc1.frequency.linearRampToValueAtTime(isDownbeat ? 510 : 470, now + duration);
+    gain1.gain.setValueAtTime(vol, now);
+    gain1.gain.setValueAtTime(vol, now + duration * 0.7);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+    osc1.start(now);
+    osc1.stop(now + duration);
+
+    // Layer 2: slightly detuned for that fat airhorn sound
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(isDownbeat ? 523 : 483, now);
+    osc2.frequency.linearRampToValueAtTime(isDownbeat ? 543 : 493, now + duration * 0.3);
+    gain2.gain.setValueAtTime(vol * 0.6, now);
+    gain2.gain.setValueAtTime(vol * 0.6, now + duration * 0.7);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(now);
+    osc2.stop(now + duration);
+
+    // Layer 3: sub-octave for body
+    const osc3 = audioCtx.createOscillator();
+    const gain3 = audioCtx.createGain();
+    osc3.type = 'square';
+    osc3.frequency.setValueAtTime(isDownbeat ? 260 : 240, now);
+    gain3.gain.setValueAtTime(vol * 0.3, now);
+    gain3.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.8);
+    osc3.connect(gain3);
+    gain3.connect(audioCtx.destination);
+    osc3.start(now);
+    osc3.stop(now + duration);
   }
 
   function tempoMarking(bpm) {
@@ -1432,8 +1488,18 @@
   });
 
   soundBtn.addEventListener('click', () => {
-    soundEnabled = !soundEnabled;
-    soundBtn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
+    // Cycle: Click -> Airhorn -> Off -> Click ...
+    if (soundEnabled && soundMode === 0) {
+      soundMode = 1;
+      soundBtn.textContent = 'Sound: Airhorn';
+    } else if (soundEnabled && soundMode === 1) {
+      soundEnabled = false;
+      soundBtn.textContent = 'Sound: Off';
+    } else {
+      soundEnabled = true;
+      soundMode = 0;
+      soundBtn.textContent = 'Sound: Click';
+    }
   });
 
   clearBtn.addEventListener('click', () => {
