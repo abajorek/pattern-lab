@@ -544,7 +544,7 @@
     <button class="ctrl-btn" id="colorBtn" data-color="0">&#x1F7E0; Warm</button>
     <button class="ctrl-btn" id="trailBtn" data-trail="0">Trail: Long</button>
     <button class="ctrl-btn" id="cameraToggleBtn">&#x1F504; Flip Camera</button>
-    <button class="ctrl-btn" id="soundBtn">Sound: On</button>
+    <button class="ctrl-btn" id="soundBtn">Sound: Click</button>
     <button class="ctrl-btn clear-btn" id="clearBtn">Clear</button>
   </div>
   <div class="sensitivity-row">
@@ -595,6 +595,8 @@
   // Direction change / beat detection state
   let audioCtx = null;
   let soundEnabled = true;
+  let soundMode = 0; // 0 = click, 1 = airhorn
+  const soundModes = ['Click', 'Airhorn'];
   let smoothedVelY = 0;         // EMA-smoothed Y velocity
   let prevScreenPos = null;     // previous screen position { x, y, time }
   let lastBeatTime = 0;         // timestamp of last beat sound (cooldown)
@@ -605,6 +607,14 @@
   const VEL_SMOOTH = 0.3;       // EMA alpha for velocity smoothing (lower = smoother)
   const VEL_THRESHOLD = 3.0;    // minimum smoothed velocity to count as intentional
   const DIR_HOLD_MIN = 3;       // frames direction must be sustained before a reversal counts
+
+  // Measure / pattern averaging state
+  let currentBeat = 0;            // which beat we're on (0 = waiting for first downbeat)
+  let currentMeasureBeats = [];   // [{x, y, beat}] ictus positions for the current measure
+  let currentMeasurePoints = [];  // [{x, y}] all tracked points in the current measure
+  let ghostPatterns = [];         // completed measures: [{points, beats, timestamp}]
+  const GHOST_DURATION = 20000;   // how long ghost patterns persist (ms)
+  const MAX_GHOST_MEASURES = 4;   // how many measures to average
 
   // Color palettes
   const palettes = [
@@ -816,9 +826,16 @@
 
   function playBeatClick(isDownbeat) {
     if (!soundEnabled || !audioCtx) return;
-    const now = audioCtx.currentTime;
 
-    // Short percussive click — higher pitch for downbeat
+    if (soundMode === 1) {
+      playAirhorn(isDownbeat);
+    } else {
+      playClick(isDownbeat);
+    }
+  }
+
+  function playClick(isDownbeat) {
+    const now = audioCtx.currentTime;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.connect(gain);
@@ -833,6 +850,53 @@
 
     osc.start(now);
     osc.stop(now + 0.08);
+  }
+
+  function playAirhorn(isDownbeat) {
+    const now = audioCtx.currentTime;
+    const duration = isDownbeat ? 0.25 : 0.15;
+    const vol = isDownbeat ? 0.4 : 0.25;
+
+    // Layer 1: main blare — sawtooth with slight pitch bend
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(isDownbeat ? 520 : 480, now);
+    osc1.frequency.linearRampToValueAtTime(isDownbeat ? 540 : 490, now + duration * 0.3);
+    osc1.frequency.linearRampToValueAtTime(isDownbeat ? 510 : 470, now + duration);
+    gain1.gain.setValueAtTime(vol, now);
+    gain1.gain.setValueAtTime(vol, now + duration * 0.7);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+    osc1.start(now);
+    osc1.stop(now + duration);
+
+    // Layer 2: slightly detuned for that fat airhorn sound
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(isDownbeat ? 523 : 483, now);
+    osc2.frequency.linearRampToValueAtTime(isDownbeat ? 543 : 493, now + duration * 0.3);
+    gain2.gain.setValueAtTime(vol * 0.6, now);
+    gain2.gain.setValueAtTime(vol * 0.6, now + duration * 0.7);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(now);
+    osc2.stop(now + duration);
+
+    // Layer 3: sub-octave for body
+    const osc3 = audioCtx.createOscillator();
+    const gain3 = audioCtx.createGain();
+    osc3.type = 'square';
+    osc3.frequency.setValueAtTime(isDownbeat ? 260 : 240, now);
+    gain3.gain.setValueAtTime(vol * 0.3, now);
+    gain3.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.8);
+    osc3.connect(gain3);
+    gain3.connect(audioCtx.destination);
+    osc3.start(now);
+    osc3.stop(now + duration);
   }
 
   function tempoMarking(bpm) {
@@ -888,6 +952,159 @@
     tempoName.textContent = tempoMarking(bpm);
   }
 
+  function recordBeat(screenX, screenY, isDownbeat) {
+    if (isDownbeat) {
+      // If we had a full measure (4 beats), save it as a ghost
+      if (currentBeat === 4 && currentMeasureBeats.length === 4 && currentMeasurePoints.length > 8) {
+        ghostPatterns.push({
+          points: currentMeasurePoints.slice(),
+          beats: currentMeasureBeats.slice(),
+          timestamp: performance.now()
+        });
+        // Keep only the most recent measures
+        if (ghostPatterns.length > MAX_GHOST_MEASURES) {
+          ghostPatterns.shift();
+        }
+      }
+      // Start new measure
+      currentBeat = 1;
+      currentMeasureBeats = [{ x: screenX, y: screenY, beat: 1 }];
+      currentMeasurePoints = [];
+    } else {
+      // Non-downbeat direction change
+      if (currentBeat >= 1 && currentBeat < 4) {
+        currentBeat++;
+        currentMeasureBeats.push({ x: screenX, y: screenY, beat: currentBeat });
+      }
+    }
+  }
+
+  // Add current tracking point to the measure path
+  function recordMeasurePoint(screenX, screenY) {
+    if (currentBeat >= 1) {
+      currentMeasurePoints.push({ x: screenX, y: screenY });
+    }
+  }
+
+  function getAverageGhostPattern() {
+    const now = performance.now();
+    // Filter out expired ghosts
+    ghostPatterns = ghostPatterns.filter(g => now - g.timestamp < GHOST_DURATION);
+    if (ghostPatterns.length === 0) return null;
+
+    // Average beat positions across all ghost measures
+    const avgBeats = [];
+    for (let b = 0; b < 4; b++) {
+      let sx = 0, sy = 0, count = 0;
+      for (const g of ghostPatterns) {
+        if (g.beats[b]) {
+          sx += g.beats[b].x;
+          sy += g.beats[b].y;
+          count++;
+        }
+      }
+      if (count > 0) {
+        avgBeats.push({ x: sx / count, y: sy / count, beat: b + 1 });
+      }
+    }
+
+    // Build averaged path by normalizing each measure's points to the same
+    // count and averaging positions at each step
+    const targetLen = 60; // resample each measure to 60 points
+    const resampledAll = [];
+    for (const g of ghostPatterns) {
+      const resampled = [];
+      for (let i = 0; i < targetLen; i++) {
+        const t = i / (targetLen - 1) * (g.points.length - 1);
+        const idx = Math.floor(t);
+        const frac = t - idx;
+        const a = g.points[Math.min(idx, g.points.length - 1)];
+        const b = g.points[Math.min(idx + 1, g.points.length - 1)];
+        resampled.push({
+          x: a.x + (b.x - a.x) * frac,
+          y: a.y + (b.y - a.y) * frac
+        });
+      }
+      resampledAll.push(resampled);
+    }
+
+    const avgPoints = [];
+    for (let i = 0; i < targetLen; i++) {
+      let sx = 0, sy = 0;
+      for (const r of resampledAll) {
+        sx += r[i].x;
+        sy += r[i].y;
+      }
+      avgPoints.push({
+        x: sx / resampledAll.length,
+        y: sy / resampledAll.length
+      });
+    }
+
+    // Compute age for fade (oldest ghost determines opacity)
+    const oldestAge = Math.max(...ghostPatterns.map(g => now - g.timestamp));
+    const fadeAlpha = Math.max(0, 1 - oldestAge / GHOST_DURATION);
+
+    return { points: avgPoints, beats: avgBeats, alpha: fadeAlpha };
+  }
+
+  function renderGhostPattern() {
+    const ghost = getAverageGhostPattern();
+    if (!ghost || ghost.points.length < 2) return;
+
+    const pts = ghost.points;
+    const baseAlpha = ghost.alpha * 0.5;
+
+    // Draw ghost trail as smooth spline
+    drawCtx.save();
+    drawCtx.lineWidth = 3;
+    drawCtx.lineCap = 'round';
+    drawCtx.lineJoin = 'round';
+    drawCtx.strokeStyle = 'rgba(255, 255, 255, ' + (baseAlpha * 0.35) + ')';
+
+    drawCtx.beginPath();
+    drawCtx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      const p0 = pts[Math.max(0, i - 2)];
+      const p1 = pts[i - 1];
+      const p2 = pts[i];
+      const p3 = pts[Math.min(pts.length - 1, i + 1)];
+      const cp1x = p1.x + (p2.x - p0.x) / 6;
+      const cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6;
+      const cp2y = p2.y - (p3.y - p1.y) / 6;
+      drawCtx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+    }
+    drawCtx.stroke();
+
+    // Glow
+    drawCtx.lineWidth = 10;
+    drawCtx.strokeStyle = 'rgba(161, 140, 209, ' + (baseAlpha * 0.12) + ')';
+    drawCtx.stroke();
+    drawCtx.restore();
+
+    // Draw beat number labels
+    for (const b of ghost.beats) {
+      const labelAlpha = ghost.alpha * 0.8;
+
+      // Circle background
+      drawCtx.beginPath();
+      drawCtx.arc(b.x, b.y, 14, 0, Math.PI * 2);
+      drawCtx.fillStyle = 'rgba(252, 92, 125, ' + (labelAlpha * 0.7) + ')';
+      drawCtx.fill();
+      drawCtx.strokeStyle = 'rgba(255, 255, 255, ' + (labelAlpha * 0.5) + ')';
+      drawCtx.lineWidth = 1.5;
+      drawCtx.stroke();
+
+      // Beat number
+      drawCtx.font = 'bold 14px "Source Sans 3", sans-serif';
+      drawCtx.textAlign = 'center';
+      drawCtx.textBaseline = 'middle';
+      drawCtx.fillStyle = 'rgba(255, 255, 255, ' + labelAlpha + ')';
+      drawCtx.fillText(b.beat, b.x, b.y);
+    }
+  }
+
   function checkDirectionChange(screenX, screenY) {
     const now = performance.now();
 
@@ -923,6 +1140,8 @@
           if (isDownbeat) {
             recordDownbeat();
           }
+          // Record beat for pattern averaging
+          recordBeat(screenX, screenY, isDownbeat);
           lastBeatTime = now;
         }
       }
@@ -1116,6 +1335,7 @@
 
         // Check for direction change and play beat click
         checkDirectionChange(result.x, result.y);
+        recordMeasurePoint(result.x, result.y);
 
         points.push({
           x: result.x,
@@ -1135,6 +1355,9 @@
           directionHoldFrames = 0;
           downbeatTimes = [];
           updateTempoDisplay();
+          currentBeat = 0;
+          currentMeasureBeats = [];
+          currentMeasurePoints = [];
         }
 
         if (points.length > 0 && points[points.length - 1] !== null) {
@@ -1153,6 +1376,9 @@
     const decay = trailSettings[trailMode].decay;
 
     drawCtx.clearRect(0, 0, w, h);
+
+    // Draw ghost pattern (average of recent measures) behind live trail
+    renderGhostPattern();
 
     const colors = palettes[colorScheme].colors;
 
@@ -1262,8 +1488,18 @@
   });
 
   soundBtn.addEventListener('click', () => {
-    soundEnabled = !soundEnabled;
-    soundBtn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
+    // Cycle: Click -> Airhorn -> Off -> Click ...
+    if (soundEnabled && soundMode === 0) {
+      soundMode = 1;
+      soundBtn.textContent = 'Sound: Airhorn';
+    } else if (soundEnabled && soundMode === 1) {
+      soundEnabled = false;
+      soundBtn.textContent = 'Sound: Off';
+    } else {
+      soundEnabled = true;
+      soundMode = 0;
+      soundBtn.textContent = 'Sound: Click';
+    }
   });
 
   clearBtn.addEventListener('click', () => {
