@@ -304,56 +304,106 @@
     margin-top: 0.5rem;
   }
 
-  /* Crosshair for countdown auto-lock */
+  /* Crosshair target for countdown auto-lock */
   #crosshair {
     position: absolute;
     top: 70%;
     left: 70%;
     transform: translate(-50%, -50%);
     z-index: 26;
-    width: 60px;
-    height: 60px;
     display: none;
+    flex-direction: column;
+    align-items: center;
   }
 
   #crosshair.visible {
-    display: block;
+    display: flex;
   }
 
-  #crosshair::before,
-  #crosshair::after {
+  .crosshair-label {
+    font-family: 'Source Sans 3', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    background: rgba(252, 92, 125, 0.85);
+    padding: 0.3rem 0.8rem;
+    border-radius: 8px;
+    margin-bottom: 0.4rem;
+    white-space: nowrap;
+    box-shadow: 0 2px 12px rgba(252, 92, 125, 0.5);
+  }
+
+  .crosshair-arrow {
+    font-size: 2rem;
+    line-height: 1;
+    color: #fc5c7d;
+    filter: drop-shadow(0 0 6px rgba(252, 92, 125, 0.8));
+    animation: bounce-arrow 0.8s ease-in-out infinite;
+  }
+
+  .crosshair-target {
+    width: 70px;
+    height: 70px;
+    position: relative;
+    margin-top: 0.15rem;
+  }
+
+  .crosshair-target::before,
+  .crosshair-target::after {
     content: '';
     position: absolute;
-    background: rgba(74, 222, 128, 0.8);
+    background: #fc5c7d;
+    box-shadow: 0 0 8px rgba(252, 92, 125, 0.6);
   }
 
-  #crosshair::before {
+  .crosshair-target::before {
     top: 50%;
-    left: 0;
-    right: 0;
-    height: 2px;
+    left: 5px;
+    right: 5px;
+    height: 3px;
     transform: translateY(-50%);
+    border-radius: 2px;
   }
 
-  #crosshair::after {
+  .crosshair-target::after {
     left: 50%;
-    top: 0;
-    bottom: 0;
-    width: 2px;
+    top: 5px;
+    bottom: 5px;
+    width: 3px;
     transform: translateX(-50%);
+    border-radius: 2px;
   }
 
   .crosshair-ring {
     position: absolute;
-    inset: 5px;
-    border: 2px solid rgba(74, 222, 128, 0.6);
+    inset: 0;
+    border: 3px solid #fc5c7d;
     border-radius: 50%;
-    animation: pulse-crosshair 2s ease-in-out infinite;
+    box-shadow: 0 0 12px rgba(252, 92, 125, 0.5), inset 0 0 12px rgba(252, 92, 125, 0.2);
+    animation: pulse-crosshair 1.5s ease-in-out infinite;
+  }
+
+  .crosshair-ring-inner {
+    position: absolute;
+    inset: 12px;
+    border: 2px dashed rgba(252, 92, 125, 0.5);
+    border-radius: 50%;
+    animation: spin-ring 4s linear infinite;
+  }
+
+  @keyframes bounce-arrow {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(5px); }
   }
 
   @keyframes pulse-crosshair {
-    0%, 100% { transform: scale(1); opacity: 0.8; }
-    50% { transform: scale(1.15); opacity: 0.4; }
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+  }
+
+  @keyframes spin-ring {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   #sensitivitySlider {
@@ -460,7 +510,14 @@
   <div id="countdownHint">Hold baton tip on the crosshair</div>
 </div>
 
-<div id="crosshair"><div class="crosshair-ring"></div></div>
+<div id="crosshair">
+  <div class="crosshair-label">HOLD TIP HERE</div>
+  <div class="crosshair-arrow">&#x25BC;</div>
+  <div class="crosshair-target">
+    <div class="crosshair-ring"></div>
+    <div class="crosshair-ring-inner"></div>
+  </div>
+</div>
 
 <div id="errorMsg">
   <h3>Camera Needed</h3>
@@ -862,9 +919,23 @@
 
       // Update last known position (smoothed)
       if (lastKnownPos) {
-        // Smooth to avoid jitter: 45% new, 55% old (heavier smoothing)
-        lastKnownPos.x = cx * 0.45 + lastKnownPos.x * 0.55;
-        lastKnownPos.y = cy * 0.45 + lastKnownPos.y * 0.55;
+        // Dead zone: if the new position is very close to the old one, snap to old
+        // This eliminates jitter when holding the baton still
+        const ddx = cx - lastKnownPos.x;
+        const ddy = cy - lastKnownPos.y;
+        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+
+        if (dist < 2.0) {
+          // Barely moved — keep old position (kills jitter when stationary)
+        } else if (dist < 6.0) {
+          // Small movement — heavy smoothing
+          lastKnownPos.x = cx * 0.25 + lastKnownPos.x * 0.75;
+          lastKnownPos.y = cy * 0.25 + lastKnownPos.y * 0.75;
+        } else {
+          // Real movement — moderate smoothing
+          lastKnownPos.x = cx * 0.5 + lastKnownPos.x * 0.5;
+          lastKnownPos.y = cy * 0.5 + lastKnownPos.y * 0.5;
+        }
       } else {
         lastKnownPos = { x: cx, y: cy };
       }
@@ -873,11 +944,11 @@
       // Map to screen coords
       let screenX;
       if (useFrontCamera) {
-        screenX = (1 - cx / pw) * window.innerWidth;
+        screenX = (1 - lastKnownPos.x / pw) * window.innerWidth;
       } else {
-        screenX = (cx / pw) * window.innerWidth;
+        screenX = (lastKnownPos.x / pw) * window.innerWidth;
       }
-      const screenY = (cy / ph) * window.innerHeight;
+      const screenY = (lastKnownPos.y / ph) * window.innerHeight;
 
       return { x: screenX, y: screenY };
     }
