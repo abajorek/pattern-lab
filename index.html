@@ -488,11 +488,15 @@
   // Direction change / beat detection state
   let audioCtx = null;
   let soundEnabled = true;
-  let prevVelY = 0;             // previous Y velocity for direction detection
+  let smoothedVelY = 0;         // EMA-smoothed Y velocity
   let prevScreenPos = null;     // previous screen position { x, y, time }
   let lastBeatTime = 0;         // timestamp of last beat sound (cooldown)
-  const BEAT_COOLDOWN_MS = 120; // minimum ms between beat clicks
-  const VEL_THRESHOLD = 1.5;    // minimum velocity magnitude to count as intentional motion
+  let directionSign = 0;        // current sustained direction: -1 up, +1 down, 0 unknown
+  let directionHoldFrames = 0;  // how many frames we've held the current direction
+  const BEAT_COOLDOWN_MS = 200; // minimum ms between beat clicks
+  const VEL_SMOOTH = 0.3;       // EMA alpha for velocity smoothing (lower = smoother)
+  const VEL_THRESHOLD = 3.0;    // minimum smoothed velocity to count as intentional
+  const DIR_HOLD_MIN = 3;       // frames direction must be sustained before a reversal counts
 
   // Color palettes
   const palettes = [
@@ -730,25 +734,33 @@
     const dt = now - prevScreenPos.time;
     if (dt < 8) return; // skip if frames are too close
 
-    // Compute velocity (pixels per frame-interval, normalized)
-    const velY = (screenY - prevScreenPos.y) / dt * 16; // normalize to ~60fps
+    // Compute raw velocity and smooth with EMA
+    const rawVelY = (screenY - prevScreenPos.y) / dt * 16; // normalize to ~60fps
+    smoothedVelY = smoothedVelY * (1 - VEL_SMOOTH) + rawVelY * VEL_SMOOTH;
 
-    // Detect Y direction reversal (the ictus — where the baton bounces)
-    // Only trigger if both old and new velocity have meaningful magnitude
-    if (Math.abs(velY) > VEL_THRESHOLD && Math.abs(prevVelY) > VEL_THRESHOLD) {
-      if ((prevVelY > 0 && velY < 0) || (prevVelY < 0 && velY > 0)) {
-        // Direction changed — check cooldown
+    prevScreenPos = { x: screenX, y: screenY, time: now };
+
+    // Only consider intentional motion above threshold
+    if (Math.abs(smoothedVelY) < VEL_THRESHOLD) return;
+
+    const newSign = smoothedVelY > 0 ? 1 : -1;
+
+    if (newSign === directionSign) {
+      // Same direction — accumulate hold frames
+      directionHoldFrames++;
+    } else {
+      // Direction reversed — only count if the previous direction was sustained
+      if (directionSign !== 0 && directionHoldFrames >= DIR_HOLD_MIN) {
         if (now - lastBeatTime > BEAT_COOLDOWN_MS) {
-          // Downbeat = was going down (positive Y), now going up
-          const isDownbeat = prevVelY > 0 && velY < 0;
+          // Downbeat = was going down (sign +1), now going up (sign -1)
+          const isDownbeat = directionSign > 0 && newSign < 0;
           playBeatClick(isDownbeat);
           lastBeatTime = now;
         }
       }
+      directionSign = newSign;
+      directionHoldFrames = 1;
     }
-
-    prevVelY = velY;
-    prevScreenPos = { x: screenX, y: screenY, time: now };
   }
 
   // --- Tracking algorithm: color similarity + proximity + motion weighting ---
@@ -850,9 +862,9 @@
 
       // Update last known position (smoothed)
       if (lastKnownPos) {
-        // Smooth to avoid jitter: 70% new, 30% old
-        lastKnownPos.x = cx * 0.7 + lastKnownPos.x * 0.3;
-        lastKnownPos.y = cy * 0.7 + lastKnownPos.y * 0.3;
+        // Smooth to avoid jitter: 45% new, 55% old (heavier smoothing)
+        lastKnownPos.x = cx * 0.45 + lastKnownPos.x * 0.55;
+        lastKnownPos.y = cy * 0.45 + lastKnownPos.y * 0.55;
       } else {
         lastKnownPos = { x: cx, y: cy };
       }
@@ -900,7 +912,9 @@
           trackingLabel.textContent = framesLost > 30 ? 'Lost target — try re-selecting' : 'Searching...';
           // Reset beat detection so we don't get a false trigger on re-acquire
           prevScreenPos = null;
-          prevVelY = 0;
+          smoothedVelY = 0;
+          directionSign = 0;
+          directionHoldFrames = 0;
         }
 
         if (points.length > 0 && points[points.length - 1] !== null) {
