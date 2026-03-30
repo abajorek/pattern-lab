@@ -963,14 +963,14 @@
 
         if (dist < 1.2) {
           // Sub-pixel noise — keep old position
-        } else if (dist < 4.0) {
-          // Small movement — smooth but still track
-          lastKnownPos.x = cx * 0.4 + lastKnownPos.x * 0.6;
-          lastKnownPos.y = cy * 0.4 + lastKnownPos.y * 0.6;
+        } else if (dist < 3.0) {
+          // Small movement — moderate smoothing
+          lastKnownPos.x = cx * 0.5 + lastKnownPos.x * 0.5;
+          lastKnownPos.y = cy * 0.5 + lastKnownPos.y * 0.5;
         } else {
-          // Real movement — light smoothing to stay faithful
-          lastKnownPos.x = cx * 0.65 + lastKnownPos.x * 0.35;
-          lastKnownPos.y = cy * 0.65 + lastKnownPos.y * 0.35;
+          // Real movement — minimal smoothing, stay responsive
+          lastKnownPos.x = cx * 0.8 + lastKnownPos.x * 0.2;
+          lastKnownPos.y = cy * 0.8 + lastKnownPos.y * 0.2;
         }
       } else {
         lastKnownPos = { x: cx, y: cy };
@@ -1058,40 +1058,65 @@
       points.shift();
     }
 
-    // Draw segments
+    // Draw smooth Catmull-Rom spline trail
     if (points.length < 2) return;
 
-    for (let i = 1; i < points.length; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
+    // Build runs of non-null points for continuous curve segments
+    const runs = [];
+    let currentRun = [];
+    for (let i = 0; i < points.length; i++) {
+      if (points[i] !== null) {
+        currentRun.push({ pt: points[i], idx: i });
+      } else {
+        if (currentRun.length >= 2) runs.push(currentRun);
+        currentRun = [];
+      }
+    }
+    if (currentRun.length >= 2) runs.push(currentRun);
 
-      if (prev === null || curr === null) continue;
+    for (const run of runs) {
+      for (let i = 1; i < run.length; i++) {
+        const p0 = (i >= 2) ? run[i - 2].pt : run[i - 1].pt;
+        const p1 = run[i - 1].pt;
+        const p2 = run[i].pt;
+        const p3 = (i + 1 < run.length) ? run[i + 1].pt : run[i].pt;
 
-      const alpha = curr.alpha;
-      const colorIdx = Math.floor((i / points.length) * colors.length) % colors.length;
-      const color = colors[colorIdx];
+        const alpha = p2.alpha;
+        const colorIdx = Math.floor((run[i].idx / points.length) * colors.length) % colors.length;
+        const color = colors[colorIdx];
 
-      const r = parseInt(color.slice(1,3), 16);
-      const g = parseInt(color.slice(3,5), 16);
-      const b = parseInt(color.slice(5,7), 16);
+        const cr = parseInt(color.slice(1,3), 16);
+        const cg = parseInt(color.slice(3,5), 16);
+        const cb = parseInt(color.slice(5,7), 16);
 
-      const lw = 2 + alpha * 4;
+        const lw = 2 + alpha * 4;
 
-      drawCtx.beginPath();
-      drawCtx.moveTo(prev.x, prev.y);
-      drawCtx.lineTo(curr.x, curr.y);
-      drawCtx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
-      drawCtx.lineWidth = lw;
-      drawCtx.lineCap = 'round';
-      drawCtx.lineJoin = 'round';
-      drawCtx.stroke();
+        // Catmull-Rom to cubic bezier control points (tension 0.5)
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
 
-      if (alpha > 0.5) {
+        // Glow layer
+        if (alpha > 0.5) {
+          drawCtx.beginPath();
+          drawCtx.moveTo(p1.x, p1.y);
+          drawCtx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          drawCtx.strokeStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + (alpha * 0.3) + ')';
+          drawCtx.lineWidth = lw + 6;
+          drawCtx.lineCap = 'round';
+          drawCtx.lineJoin = 'round';
+          drawCtx.stroke();
+        }
+
+        // Main stroke
         drawCtx.beginPath();
-        drawCtx.moveTo(prev.x, prev.y);
-        drawCtx.lineTo(curr.x, curr.y);
-        drawCtx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (alpha * 0.3) + ')';
-        drawCtx.lineWidth = lw + 6;
+        drawCtx.moveTo(p1.x, p1.y);
+        drawCtx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+        drawCtx.strokeStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + alpha + ')';
+        drawCtx.lineWidth = lw;
+        drawCtx.lineCap = 'round';
+        drawCtx.lineJoin = 'round';
         drawCtx.stroke();
       }
     }
