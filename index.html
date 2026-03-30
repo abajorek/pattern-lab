@@ -134,11 +134,6 @@
     pointer-events: none;
   }
 
-  #drawCanvas.selecting {
-    pointer-events: auto;
-    cursor: crosshair;
-  }
-
   #controls {
     position: absolute;
     bottom: 0;
@@ -309,56 +304,106 @@
     margin-top: 0.5rem;
   }
 
-  /* Crosshair for countdown auto-lock */
+  /* Crosshair target for countdown auto-lock */
   #crosshair {
     position: absolute;
-    top: 50%;
-    left: 50%;
+    top: 70%;
+    left: 70%;
     transform: translate(-50%, -50%);
     z-index: 26;
-    width: 60px;
-    height: 60px;
     display: none;
+    flex-direction: column;
+    align-items: center;
   }
 
   #crosshair.visible {
-    display: block;
+    display: flex;
   }
 
-  #crosshair::before,
-  #crosshair::after {
+  .crosshair-label {
+    font-family: 'Source Sans 3', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    background: rgba(252, 92, 125, 0.85);
+    padding: 0.3rem 0.8rem;
+    border-radius: 8px;
+    margin-bottom: 0.4rem;
+    white-space: nowrap;
+    box-shadow: 0 2px 12px rgba(252, 92, 125, 0.5);
+  }
+
+  .crosshair-arrow {
+    font-size: 2rem;
+    line-height: 1;
+    color: #fc5c7d;
+    filter: drop-shadow(0 0 6px rgba(252, 92, 125, 0.8));
+    animation: bounce-arrow 0.8s ease-in-out infinite;
+  }
+
+  .crosshair-target {
+    width: 70px;
+    height: 70px;
+    position: relative;
+    margin-top: 0.15rem;
+  }
+
+  .crosshair-target::before,
+  .crosshair-target::after {
     content: '';
     position: absolute;
-    background: rgba(74, 222, 128, 0.8);
+    background: #fc5c7d;
+    box-shadow: 0 0 8px rgba(252, 92, 125, 0.6);
   }
 
-  #crosshair::before {
+  .crosshair-target::before {
     top: 50%;
-    left: 0;
-    right: 0;
-    height: 2px;
+    left: 5px;
+    right: 5px;
+    height: 3px;
     transform: translateY(-50%);
+    border-radius: 2px;
   }
 
-  #crosshair::after {
+  .crosshair-target::after {
     left: 50%;
-    top: 0;
-    bottom: 0;
-    width: 2px;
+    top: 5px;
+    bottom: 5px;
+    width: 3px;
     transform: translateX(-50%);
+    border-radius: 2px;
   }
 
   .crosshair-ring {
     position: absolute;
-    inset: 5px;
-    border: 2px solid rgba(74, 222, 128, 0.6);
+    inset: 0;
+    border: 3px solid #fc5c7d;
     border-radius: 50%;
-    animation: pulse-crosshair 2s ease-in-out infinite;
+    box-shadow: 0 0 12px rgba(252, 92, 125, 0.5), inset 0 0 12px rgba(252, 92, 125, 0.2);
+    animation: pulse-crosshair 1.5s ease-in-out infinite;
+  }
+
+  .crosshair-ring-inner {
+    position: absolute;
+    inset: 12px;
+    border: 2px dashed rgba(252, 92, 125, 0.5);
+    border-radius: 50%;
+    animation: spin-ring 4s linear infinite;
+  }
+
+  @keyframes bounce-arrow {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(5px); }
   }
 
   @keyframes pulse-crosshair {
-    0%, 100% { transform: scale(1); opacity: 0.8; }
-    50% { transform: scale(1.15); opacity: 0.4; }
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+  }
+
+  @keyframes spin-ring {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   #sensitivitySlider {
@@ -388,43 +433,6 @@
     display: inline-block;
     vertical-align: middle;
     background: #555;
-  }
-
-  /* Selection overlay hint */
-  #selectOverlay {
-    position: absolute;
-    inset: 0;
-    z-index: 15;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
-
-  #selectOverlay.visible {
-    display: flex;
-  }
-
-  #selectOverlay .hint {
-    background: rgba(10,10,15,0.85);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(74, 222, 128, 0.4);
-    border-radius: 12px;
-    padding: 1rem 1.5rem;
-    text-align: center;
-    color: #e8e4df;
-    font-size: 0.95rem;
-    max-width: 280px;
-    animation: fadeInUp 0.3s ease;
-  }
-
-  #selectOverlay .hint strong {
-    color: #4ade80;
-  }
-
-  @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
   }
 
   #errorMsg {
@@ -462,7 +470,7 @@
   <p class="subtitle">Conducting Pattern Tracker</p>
   <ol class="instructions">
     <li data-num="1">Hold your baton (or any object) in front of the camera</li>
-    <li data-num="2">Tap <strong>Select Tip</strong> and then tap the baton tip on screen to lock onto it</li>
+    <li data-num="2">Tap <strong>Select Tip</strong>, then hold the baton tip on the crosshair during the countdown</li>
     <li data-num="3">Conduct! The app tracks the tip and draws your pattern</li>
     <li data-num="4">Trails fade over time so you can see the shape of your gesture</li>
   </ol>
@@ -475,13 +483,6 @@
   <canvas id="drawCanvas"></canvas>
 </div>
 
-<div id="selectOverlay">
-  <div class="hint">
-    <strong>Tap the baton tip</strong> in the video to lock on.<br>
-    The tracker will follow that color.
-  </div>
-</div>
-
 <div id="trackingIndicator">
   <div id="trackingDot"></div>
   <span id="trackingLabel">Tap "Select Tip" to begin</span>
@@ -490,10 +491,10 @@
 <div id="controls">
   <div class="control-row">
     <button class="ctrl-btn select-btn" id="selectBtn">Select Tip</button>
-    <button class="ctrl-btn select-btn" id="remoteSelectBtn">Remote Select</button>
     <button class="ctrl-btn" id="colorBtn" data-color="0">&#x1F7E0; Warm</button>
     <button class="ctrl-btn" id="trailBtn" data-trail="0">Trail: Long</button>
     <button class="ctrl-btn" id="cameraToggleBtn">&#x1F504; Flip Camera</button>
+    <button class="ctrl-btn" id="soundBtn">Sound: On</button>
     <button class="ctrl-btn clear-btn" id="clearBtn">Clear</button>
   </div>
   <div class="sensitivity-row">
@@ -509,7 +510,14 @@
   <div id="countdownHint">Hold baton tip on the crosshair</div>
 </div>
 
-<div id="crosshair"><div class="crosshair-ring"></div></div>
+<div id="crosshair">
+  <div class="crosshair-label">HOLD TIP HERE</div>
+  <div class="crosshair-arrow">&#x25BC;</div>
+  <div class="crosshair-target">
+    <div class="crosshair-ring"></div>
+    <div class="crosshair-ring-inner"></div>
+  </div>
+</div>
 
 <div id="errorMsg">
   <h3>Camera Needed</h3>
@@ -528,12 +536,24 @@
   let useFrontCamera = false;
 
   // Baton tip tracking state
-  let selectMode = false;       // true when waiting for user to tap baton tip
   let targetColor = null;       // { r, g, b } of the selected baton tip
   let lastKnownPos = null;      // { x, y } in processing canvas coords for proximity weighting
   let framesLost = 0;           // how many frames since we last saw the target
   let prevFrameData = null;     // previous frame pixel data for motion detection
   let countdownActive = false;  // true during remote select countdown
+
+  // Direction change / beat detection state
+  let audioCtx = null;
+  let soundEnabled = true;
+  let smoothedVelY = 0;         // EMA-smoothed Y velocity
+  let prevScreenPos = null;     // previous screen position { x, y, time }
+  let lastBeatTime = 0;         // timestamp of last beat sound (cooldown)
+  let directionSign = 0;        // current sustained direction: -1 up, +1 down, 0 unknown
+  let directionHoldFrames = 0;  // how many frames we've held the current direction
+  const BEAT_COOLDOWN_MS = 200; // minimum ms between beat clicks
+  const VEL_SMOOTH = 0.3;       // EMA alpha for velocity smoothing (lower = smoother)
+  const VEL_THRESHOLD = 3.0;    // minimum smoothed velocity to count as intentional
+  const DIR_HOLD_MIN = 3;       // frames direction must be sustained before a reversal counts
 
   // Color palettes
   const palettes = [
@@ -566,13 +586,12 @@
   const sensitivitySlider = document.getElementById('sensitivitySlider');
   const errorMsg = document.getElementById('errorMsg');
   const selectBtn = document.getElementById('selectBtn');
-  const selectOverlay = document.getElementById('selectOverlay');
   const colorSwatch = document.getElementById('colorSwatch');
   const toleranceValue = document.getElementById('toleranceValue');
-  const remoteSelectBtn = document.getElementById('remoteSelectBtn');
   const countdownOverlay = document.getElementById('countdownOverlay');
   const countdownNumber = document.getElementById('countdownNumber');
   const crosshair = document.getElementById('crosshair');
+  const soundBtn = document.getElementById('soundBtn');
 
   const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
   const drawCtx = drawCanvas.getContext('2d');
@@ -620,6 +639,7 @@
   // Start
   startBtn.addEventListener('click', async () => {
     try {
+      ensureAudioCtx();
       await startCamera();
 
       startScreen.classList.add('hidden');
@@ -641,8 +661,8 @@
   function resizeCanvases() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    procCanvas.width = 320;
-    procCanvas.height = 240;
+    procCanvas.width = 640;
+    procCanvas.height = 480;
     drawCanvas.width = w * devicePixelRatio;
     drawCanvas.height = h * devicePixelRatio;
     drawCanvas.style.width = w + 'px';
@@ -655,118 +675,15 @@
     toleranceValue.textContent = sensitivitySlider.value;
   });
 
-  // --- Selection mode ---
-
-  function enterSelectMode() {
-    selectMode = true;
-    targetColor = null;
-    lastKnownPos = null;
-    framesLost = 0;
-    drawCanvas.classList.add('selecting');
-    selectBtn.classList.add('active');
-    selectOverlay.classList.add('visible');
-    trackingDot.classList.remove('tracking');
-    trackingDot.classList.add('selecting');
-    trackingLabel.textContent = 'Tap the baton tip...';
-  }
-
-  function exitSelectMode() {
-    selectMode = false;
-    drawCanvas.classList.remove('selecting');
-    selectBtn.classList.remove('active');
-    selectOverlay.classList.remove('visible');
-    trackingDot.classList.remove('selecting');
-  }
+  // --- Select Tip: countdown + crosshair auto-lock ---
 
   selectBtn.addEventListener('click', () => {
-    if (selectMode) {
-      exitSelectMode();
-      if (!targetColor) {
-        trackingLabel.textContent = 'Tap "Select Tip" to begin';
-      }
-    } else {
-      enterSelectMode();
-    }
-  });
-
-  // Handle tap on canvas to select baton tip color
-  drawCanvas.addEventListener('click', (e) => {
-    if (!selectMode) return;
-
-    const rect = drawCanvas.getBoundingClientRect();
-    let tapX = (e.clientX - rect.left) / rect.width;
-    let tapY = (e.clientY - rect.top) / rect.height;
-
-    // If front camera is mirrored, flip the tap X to match unmirrored processing canvas
-    if (useFrontCamera) {
-      tapX = 1 - tapX;
-    }
-
-    // Map to processing canvas coords
-    const pw = procCanvas.width;
-    const ph = procCanvas.height;
-    const px = Math.round(tapX * pw);
-    const py = Math.round(tapY * ph);
-
-    // Draw current frame to processing canvas and sample color
-    procCtx.drawImage(video, 0, 0, pw, ph);
-    const imageData = procCtx.getImageData(0, 0, pw, ph);
-    const data = imageData.data;
-
-    // Sample a small region around the tap point (5x5) for a stable average
-    let sumR = 0, sumG = 0, sumB = 0, count = 0;
-    const sampleRadius = 3;
-    for (let dy = -sampleRadius; dy <= sampleRadius; dy++) {
-      for (let dx = -sampleRadius; dx <= sampleRadius; dx++) {
-        const sx = px + dx;
-        const sy = py + dy;
-        if (sx < 0 || sx >= pw || sy < 0 || sy >= ph) continue;
-        const i = (sy * pw + sx) * 4;
-        sumR += data[i];
-        sumG += data[i + 1];
-        sumB += data[i + 2];
-        count++;
-      }
-    }
-
-    if (count > 0) {
-      targetColor = {
-        r: Math.round(sumR / count),
-        g: Math.round(sumG / count),
-        b: Math.round(sumB / count)
-      };
-      lastKnownPos = { x: px, y: py };
-      framesLost = 0;
-
-      // Update swatch
-      colorSwatch.style.background = 'rgb(' + targetColor.r + ',' + targetColor.g + ',' + targetColor.b + ')';
-
-      exitSelectMode();
-      trackingLabel.textContent = 'Locked on — tracking';
-      points = []; // clear old trails
-    }
-  });
-
-  // Also support touch
-  drawCanvas.addEventListener('touchend', (e) => {
-    if (!selectMode) return;
-    e.preventDefault();
-    const touch = e.changedTouches[0];
-    const clickEvent = new MouseEvent('click', {
-      clientX: touch.clientX,
-      clientY: touch.clientY
-    });
-    drawCanvas.dispatchEvent(clickEvent);
-  });
-
-  // --- Remote Select: countdown + crosshair auto-lock ---
-
-  remoteSelectBtn.addEventListener('click', () => {
     if (countdownActive) return;
     countdownActive = true;
-    remoteSelectBtn.classList.add('active');
+    selectBtn.classList.add('active');
     countdownOverlay.classList.add('visible');
     crosshair.classList.add('visible');
+    trackingDot.classList.remove('tracking');
     trackingDot.classList.add('selecting');
     trackingLabel.textContent = 'Get in position...';
 
@@ -779,11 +696,15 @@
         countdownNumber.textContent = secondsLeft;
       } else {
         clearInterval(ticker);
-        // Auto-lock: sample the center of the screen (where crosshair is)
+        // Auto-lock: sample at the crosshair position (70% x, 70% y)
         const pw = procCanvas.width;
         const ph = procCanvas.height;
-        const cx = Math.round(pw / 2);
-        const cy = Math.round(ph / 2);
+        // Crosshair is at 70%/70% of screen; map to processing canvas
+        // If front camera, the video is mirrored so flip the X
+        const crosshairScreenX = 0.7;
+        const crosshairScreenY = 0.7;
+        const cx = Math.round((useFrontCamera ? (1 - crosshairScreenX) : crosshairScreenX) * pw);
+        const cy = Math.round(crosshairScreenY * ph);
 
         procCtx.drawImage(video, 0, 0, pw, ph);
         const imageData = procCtx.getImageData(0, 0, pw, ph);
@@ -821,20 +742,92 @@
 
         countdownOverlay.classList.remove('visible');
         crosshair.classList.remove('visible');
-        remoteSelectBtn.classList.remove('active');
+        selectBtn.classList.remove('active');
         countdownActive = false;
       }
     }, 1000);
   });
 
+  // --- Beat sound engine (Web Audio API) ---
+
+  function ensureAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playBeatClick(isDownbeat) {
+    if (!soundEnabled || !audioCtx) return;
+    const now = audioCtx.currentTime;
+
+    // Short percussive click — higher pitch for downbeat
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(isDownbeat ? 900 : 600, now);
+    osc.frequency.exponentialRampToValueAtTime(isDownbeat ? 450 : 300, now + 0.06);
+
+    gain.gain.setValueAtTime(isDownbeat ? 0.35 : 0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
+  function checkDirectionChange(screenX, screenY) {
+    const now = performance.now();
+
+    if (!prevScreenPos) {
+      prevScreenPos = { x: screenX, y: screenY, time: now };
+      return;
+    }
+
+    const dt = now - prevScreenPos.time;
+    if (dt < 8) return; // skip if frames are too close
+
+    // Compute raw velocity and smooth with EMA
+    const rawVelY = (screenY - prevScreenPos.y) / dt * 16; // normalize to ~60fps
+    smoothedVelY = smoothedVelY * (1 - VEL_SMOOTH) + rawVelY * VEL_SMOOTH;
+
+    prevScreenPos = { x: screenX, y: screenY, time: now };
+
+    // Only consider intentional motion above threshold
+    if (Math.abs(smoothedVelY) < VEL_THRESHOLD) return;
+
+    const newSign = smoothedVelY > 0 ? 1 : -1;
+
+    if (newSign === directionSign) {
+      // Same direction — accumulate hold frames
+      directionHoldFrames++;
+    } else {
+      // Direction reversed — only count if the previous direction was sustained
+      if (directionSign !== 0 && directionHoldFrames >= DIR_HOLD_MIN) {
+        if (now - lastBeatTime > BEAT_COOLDOWN_MS) {
+          // Downbeat = was going down (sign +1), now going up (sign -1)
+          const isDownbeat = directionSign > 0 && newSign < 0;
+          playBeatClick(isDownbeat);
+          lastBeatTime = now;
+        }
+      }
+      directionSign = newSign;
+      directionHoldFrames = 1;
+    }
+  }
+
   // --- Tracking algorithm: color similarity + proximity + motion weighting ---
 
-  function colorDistance(r1, g1, b1, r2, g2, b2) {
-    // Weighted Euclidean distance in RGB space
+  function colorDistSq(r1, g1, b1, r2, g2, b2) {
+    // Weighted squared distance in RGB space (no sqrt for speed)
     const dr = r1 - r2;
     const dg = g1 - g2;
     const db = b1 - b2;
-    return Math.sqrt(dr * dr * 2 + dg * dg * 4 + db * db * 3);
+    return dr * dr * 2 + dg * dg * 4 + db * db * 3;
   }
 
   function findTrackedPoint() {
@@ -850,23 +843,24 @@
     const tolerance = sensitivitySlider.value;
     // Map to a color distance threshold: strict=30, loose=150
     const maxColorDist = 30 + tolerance * 1.2;
+    const maxColorDistSq = maxColorDist * maxColorDist;
 
     // Proximity search radius — expand if we've lost the target
-    const proximityWeight = lastKnownPos ? 1.0 : 0.0;
-    const searchExpand = Math.min(framesLost * 5, 100); // expand search area over time
+    const hasLastPos = lastKnownPos !== null;
+    const searchExpand = Math.min(framesLost * 8, 200);
 
-    // Build motion map from frame differencing
+    // Build motion map from frame differencing (at half resolution for speed)
     let motionMap = null;
     if (prevFrameData && prevFrameData.length === data.length) {
-      motionMap = new Float32Array(pw * ph);
+      motionMap = new Float32Array((pw >> 1) * (ph >> 1));
+      const mw = pw >> 1;
       for (let y = 0; y < ph; y += 2) {
         for (let x = 0; x < pw; x += 2) {
           const i = (y * pw + x) * 4;
           const dr = data[i] - prevFrameData[i];
           const dg = data[i + 1] - prevFrameData[i + 1];
           const db = data[i + 2] - prevFrameData[i + 2];
-          const motion = Math.sqrt(dr * dr + dg * dg + db * db);
-          motionMap[y * pw + x] = motion;
+          motionMap[(y >> 1) * mw + (x >> 1)] = dr * dr + dg * dg + db * db;
         }
       }
     }
@@ -876,40 +870,59 @@
     let sumX = 0, sumY = 0, sumWeight = 0;
 
     const tR = targetColor.r, tG = targetColor.g, tB = targetColor.b;
+    const mw = pw >> 1;
+    const motionThreshSq = 225; // 15^2
 
-    for (let y = 0; y < ph; y += 2) {
-      for (let x = 0; x < pw; x += 2) {
+    // Two-pass strategy: if we have a last known position, search a focused
+    // region first. If that fails, fall back to full-frame scan.
+    // Focused region is much faster and more accurate.
+    let scanYMin = 0, scanYMax = ph, scanXMin = 0, scanXMax = pw;
+    let focusedSearch = false;
+
+    if (hasLastPos && framesLost < 10) {
+      const r = 120 + searchExpand;
+      scanYMin = Math.max(0, Math.floor(lastKnownPos.y - r));
+      scanYMax = Math.min(ph, Math.ceil(lastKnownPos.y + r));
+      scanXMin = Math.max(0, Math.floor(lastKnownPos.x - r));
+      scanXMax = Math.min(pw, Math.ceil(lastKnownPos.x + r));
+      focusedSearch = true;
+    }
+
+    for (let y = scanYMin; y < scanYMax; y++) {
+      for (let x = scanXMin; x < scanXMax; x++) {
         const i = (y * pw + x) * 4;
         const r = data[i], g = data[i + 1], b = data[i + 2];
 
-        const cDist = colorDistance(r, g, b, tR, tG, tB);
-        if (cDist > maxColorDist) continue;
+        const cDistSq = colorDistSq(r, g, b, tR, tG, tB);
+        if (cDistSq > maxColorDistSq) continue;
 
-        // Color similarity weight (closer color = higher weight)
-        const colorWeight = 1.0 - (cDist / maxColorDist);
+        // Color similarity weight
+        const colorWeight = 1.0 - Math.sqrt(cDistSq) / maxColorDist;
 
-        // Proximity weight (closer to last known position = higher weight)
+        // Proximity weight
         let proxWeight = 1.0;
-        if (lastKnownPos && proximityWeight > 0) {
+        if (hasLastPos) {
           const dx = x - lastKnownPos.x;
           const dy = y - lastKnownPos.y;
-          const pixDist = Math.sqrt(dx * dx + dy * dy);
-          // Soft falloff: within ~60px is full weight, then falls off
-          const radius = 60 + searchExpand;
-          proxWeight = Math.max(0.05, 1.0 - (pixDist / radius) * 0.8);
+          const pixDistSq = dx * dx + dy * dy;
+          const radius = 120 + searchExpand;
+          const radiusSq = radius * radius;
+          if (pixDistSq < radiusSq) {
+            proxWeight = 1.0 - Math.sqrt(pixDistSq) / radius * 0.7;
+          } else {
+            proxWeight = 0.05;
+          }
         }
 
-        // Motion weight: moving pixels get a significant boost
-        // This helps distinguish the baton (moving fast) from static same-colored objects
+        // Motion weight from half-res motion map
         let motionWeight = 1.0;
         if (motionMap) {
-          const m = motionMap[y * pw + x];
-          // Pixels with motion > 15 get boosted, static pixels get penalized
-          // Threshold 15 ignores camera noise; scale tapers off at ~80
-          if (m > 15) {
-            motionWeight = 1.0 + Math.min((m - 15) / 65, 2.0); // up to 3x boost
+          const mSq = motionMap[(y >> 1) * mw + (x >> 1)];
+          if (mSq > motionThreshSq) {
+            const m = Math.sqrt(mSq);
+            motionWeight = 1.0 + Math.min((m - 15) / 65, 2.0);
           } else {
-            motionWeight = 0.3; // static pixels heavily penalized
+            motionWeight = 0.3;
           }
         }
 
@@ -920,15 +933,45 @@
       }
     }
 
-    if (sumWeight > 0.5) {
+    // If focused search found nothing, try full frame
+    if (focusedSearch && sumWeight < 0.1) {
+      for (let y = 0; y < ph; y += 2) {
+        for (let x = 0; x < pw; x += 2) {
+          const i = (y * pw + x) * 4;
+          const r = data[i], g = data[i + 1], b = data[i + 2];
+          const cDistSq = colorDistSq(r, g, b, tR, tG, tB);
+          if (cDistSq > maxColorDistSq) continue;
+          const colorWeight = 1.0 - Math.sqrt(cDistSq) / maxColorDist;
+          sumX += x * colorWeight;
+          sumY += y * colorWeight;
+          sumWeight += colorWeight;
+        }
+      }
+    }
+
+    if (sumWeight > 0.1) {
       const cx = sumX / sumWeight;
       const cy = sumY / sumWeight;
 
       // Update last known position (smoothed)
       if (lastKnownPos) {
-        // Smooth to avoid jitter: 70% new, 30% old
-        lastKnownPos.x = cx * 0.7 + lastKnownPos.x * 0.3;
-        lastKnownPos.y = cy * 0.7 + lastKnownPos.y * 0.3;
+        // Dead zone: if the new position is very close to the old one, snap to old
+        // This eliminates jitter when holding the baton still
+        const ddx = cx - lastKnownPos.x;
+        const ddy = cy - lastKnownPos.y;
+        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+
+        if (dist < 1.2) {
+          // Sub-pixel noise — keep old position
+        } else if (dist < 3.0) {
+          // Small movement — moderate smoothing
+          lastKnownPos.x = cx * 0.5 + lastKnownPos.x * 0.5;
+          lastKnownPos.y = cy * 0.5 + lastKnownPos.y * 0.5;
+        } else {
+          // Real movement — minimal smoothing, stay responsive
+          lastKnownPos.x = cx * 0.8 + lastKnownPos.x * 0.2;
+          lastKnownPos.y = cy * 0.8 + lastKnownPos.y * 0.2;
+        }
       } else {
         lastKnownPos = { x: cx, y: cy };
       }
@@ -937,11 +980,11 @@
       // Map to screen coords
       let screenX;
       if (useFrontCamera) {
-        screenX = (1 - cx / pw) * window.innerWidth;
+        screenX = (1 - lastKnownPos.x / pw) * window.innerWidth;
       } else {
-        screenX = (cx / pw) * window.innerWidth;
+        screenX = (lastKnownPos.x / pw) * window.innerWidth;
       }
-      const screenY = (cy / ph) * window.innerHeight;
+      const screenY = (lastKnownPos.y / ph) * window.innerHeight;
 
       return { x: screenX, y: screenY };
     }
@@ -952,13 +995,16 @@
 
   // Main loop
   function loop() {
-    if (!selectMode && !countdownActive) {
+    if (!countdownActive) {
       const result = findTrackedPoint();
 
       if (result) {
         isTracking = true;
         trackingDot.classList.add('tracking');
         trackingLabel.textContent = 'Tracking';
+
+        // Check for direction change and play beat click
+        checkDirectionChange(result.x, result.y);
 
         points.push({
           x: result.x,
@@ -971,6 +1017,11 @@
           isTracking = false;
           trackingDot.classList.remove('tracking');
           trackingLabel.textContent = framesLost > 30 ? 'Lost target — try re-selecting' : 'Searching...';
+          // Reset beat detection so we don't get a false trigger on re-acquire
+          prevScreenPos = null;
+          smoothedVelY = 0;
+          directionSign = 0;
+          directionHoldFrames = 0;
         }
 
         if (points.length > 0 && points[points.length - 1] !== null) {
@@ -1007,40 +1058,65 @@
       points.shift();
     }
 
-    // Draw segments
+    // Draw smooth Catmull-Rom spline trail
     if (points.length < 2) return;
 
-    for (let i = 1; i < points.length; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
+    // Build runs of non-null points for continuous curve segments
+    const runs = [];
+    let currentRun = [];
+    for (let i = 0; i < points.length; i++) {
+      if (points[i] !== null) {
+        currentRun.push({ pt: points[i], idx: i });
+      } else {
+        if (currentRun.length >= 2) runs.push(currentRun);
+        currentRun = [];
+      }
+    }
+    if (currentRun.length >= 2) runs.push(currentRun);
 
-      if (prev === null || curr === null) continue;
+    for (const run of runs) {
+      for (let i = 1; i < run.length; i++) {
+        const p0 = (i >= 2) ? run[i - 2].pt : run[i - 1].pt;
+        const p1 = run[i - 1].pt;
+        const p2 = run[i].pt;
+        const p3 = (i + 1 < run.length) ? run[i + 1].pt : run[i].pt;
 
-      const alpha = curr.alpha;
-      const colorIdx = Math.floor((i / points.length) * colors.length) % colors.length;
-      const color = colors[colorIdx];
+        const alpha = p2.alpha;
+        const colorIdx = Math.floor((run[i].idx / points.length) * colors.length) % colors.length;
+        const color = colors[colorIdx];
 
-      const r = parseInt(color.slice(1,3), 16);
-      const g = parseInt(color.slice(3,5), 16);
-      const b = parseInt(color.slice(5,7), 16);
+        const cr = parseInt(color.slice(1,3), 16);
+        const cg = parseInt(color.slice(3,5), 16);
+        const cb = parseInt(color.slice(5,7), 16);
 
-      const lw = 2 + alpha * 4;
+        const lw = 2 + alpha * 4;
 
-      drawCtx.beginPath();
-      drawCtx.moveTo(prev.x, prev.y);
-      drawCtx.lineTo(curr.x, curr.y);
-      drawCtx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
-      drawCtx.lineWidth = lw;
-      drawCtx.lineCap = 'round';
-      drawCtx.lineJoin = 'round';
-      drawCtx.stroke();
+        // Catmull-Rom to cubic bezier control points (tension 0.5)
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
 
-      if (alpha > 0.5) {
+        // Glow layer
+        if (alpha > 0.5) {
+          drawCtx.beginPath();
+          drawCtx.moveTo(p1.x, p1.y);
+          drawCtx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          drawCtx.strokeStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + (alpha * 0.3) + ')';
+          drawCtx.lineWidth = lw + 6;
+          drawCtx.lineCap = 'round';
+          drawCtx.lineJoin = 'round';
+          drawCtx.stroke();
+        }
+
+        // Main stroke
         drawCtx.beginPath();
-        drawCtx.moveTo(prev.x, prev.y);
-        drawCtx.lineTo(curr.x, curr.y);
-        drawCtx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (alpha * 0.3) + ')';
-        drawCtx.lineWidth = lw + 6;
+        drawCtx.moveTo(p1.x, p1.y);
+        drawCtx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+        drawCtx.strokeStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + alpha + ')';
+        drawCtx.lineWidth = lw;
+        drawCtx.lineCap = 'round';
+        drawCtx.lineJoin = 'round';
         drawCtx.stroke();
       }
     }
@@ -1070,6 +1146,11 @@
   trailBtn.addEventListener('click', () => {
     trailMode = (trailMode + 1) % trailSettings.length;
     trailBtn.textContent = trailSettings[trailMode].label;
+  });
+
+  soundBtn.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    soundBtn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
   });
 
   clearBtn.addEventListener('click', () => {
