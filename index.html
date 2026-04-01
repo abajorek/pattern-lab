@@ -480,6 +480,28 @@
     font-style: italic;
   }
 
+  /* Guide pattern overlay */
+  #guidePatternLabel {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0.5rem) + 0.5rem);
+    right: 1rem;
+    z-index: 20;
+    font-family: 'Source Sans 3', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: rgba(240, 194, 127, 0.8);
+    padding: 0.3rem 0.7rem;
+    background: rgba(10,10,15,0.7);
+    backdrop-filter: blur(8px);
+    border-radius: 12px;
+    border: 1px solid rgba(240, 194, 127, 0.2);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+
+  #guidePatternLabel.visible { opacity: 1; }
+
   #errorMsg {
     position: absolute;
     top: 50%;
@@ -545,6 +567,7 @@
     <button class="ctrl-btn" id="trailBtn" data-trail="0">Trail: Long</button>
     <button class="ctrl-btn" id="cameraToggleBtn">&#x1F504; Flip Camera</button>
     <button class="ctrl-btn" id="soundBtn">Sound: Click</button>
+    <button class="ctrl-btn" id="guideBtn">Guide: 4/4</button>
     <button class="ctrl-btn clear-btn" id="clearBtn">Clear</button>
   </div>
   <div class="sensitivity-row">
@@ -568,6 +591,8 @@
     <div class="crosshair-ring-inner"></div>
   </div>
 </div>
+
+<div id="guidePatternLabel">4/4 Basic Arc (Waybright)</div>
 
 <div id="errorMsg">
   <h3>Camera Needed</h3>
@@ -616,6 +641,94 @@
   const GHOST_DURATION = 20000;   // how long ghost patterns persist (ms)
   const MAX_GHOST_MEASURES = 4;   // how many measures to average
 
+  // Conducting guide pattern state
+  let showGuide = true;
+  let guideMode = 0; // 0 = 4/4, future: 1 = 3/4, 2 = 2/4, etc.
+
+  // Waybright Basic Conducting patterns
+  // Coordinates normalized 0–1 within the guide bounding box
+  // Y: 0 = top, 1 = bottom (ictus level)
+  const guidePatternDefs = [
+    {
+      name: '4/4',
+      label: '4/4 Basic Arc (Waybright)',
+      // Ictus positions (beat points) — where the baton bounces
+      beats: [
+        { x: 0.50, y: 1.00, label: '1,4' },  // center bottom (downbeat & 4)
+        { x: 0.00, y: 0.92, label: '2' },     // far left
+        { x: 1.00, y: 0.92, label: '3' },     // far right
+      ],
+      // Path segments drawn in order — describes the full conducting gesture
+      paths: [
+        // Prep stroke: straight up from beat 1 position
+        { type: 'line', from: { x: 0.50, y: 1.00 }, to: { x: 0.50, y: 0.05 }, style: 'prep' },
+        // Downbeat: straight down to beat 1
+        { type: 'line', from: { x: 0.50, y: 0.05 }, to: { x: 0.50, y: 1.00 }, style: 'main' },
+        // Beat 1 → 2: arc left (up and over to the left)
+        { type: 'cubic',
+          from: { x: 0.50, y: 1.00 },
+          cp1:  { x: 0.42, y: 0.52 },
+          cp2:  { x: 0.12, y: 0.48 },
+          to:   { x: 0.00, y: 0.92 },
+          style: 'main' },
+        // Beat 2 → 3: arc crossing right (up and over to the right)
+        { type: 'cubic',
+          from: { x: 0.00, y: 0.92 },
+          cp1:  { x: 0.20, y: 0.45 },
+          cp2:  { x: 0.80, y: 0.45 },
+          to:   { x: 1.00, y: 0.92 },
+          style: 'main' },
+        // Beat 3 → 4: arc back to center
+        { type: 'cubic',
+          from: { x: 1.00, y: 0.92 },
+          cp1:  { x: 0.82, y: 0.50 },
+          cp2:  { x: 0.58, y: 0.52 },
+          to:   { x: 0.50, y: 1.00 },
+          style: 'main' },
+      ],
+      // Arrow hints on each segment to show direction
+      arrows: [
+        { seg: 1, t: 0.5 },  // midpoint of downbeat
+        { seg: 2, t: 0.5 },  // midpoint of 1→2 arc
+        { seg: 3, t: 0.5 },  // midpoint of 2→3 arc
+        { seg: 4, t: 0.5 },  // midpoint of 3→4 arc
+      ]
+    },
+    {
+      name: '3/4',
+      label: '3/4 Basic Arc (Waybright)',
+      beats: [
+        { x: 0.00, y: 1.00, label: '1,3' },  // left bottom (downbeat & 3)
+        { x: 1.00, y: 0.92, label: '2' },     // right bottom
+      ],
+      paths: [
+        // Prep stroke: straight up from beat 1
+        { type: 'line', from: { x: 0.00, y: 1.00 }, to: { x: 0.00, y: 0.05 }, style: 'prep' },
+        // Downbeat: straight down to beat 1
+        { type: 'line', from: { x: 0.00, y: 0.05 }, to: { x: 0.00, y: 1.00 }, style: 'main' },
+        // Beat 1 → 2: arc right (lower arc)
+        { type: 'cubic',
+          from: { x: 0.00, y: 1.00 },
+          cp1:  { x: 0.25, y: 0.50 },
+          cp2:  { x: 0.75, y: 0.45 },
+          to:   { x: 1.00, y: 0.92 },
+          style: 'main' },
+        // Beat 2 → 3: arc back left (higher arc, over the first)
+        { type: 'cubic',
+          from: { x: 1.00, y: 0.92 },
+          cp1:  { x: 0.70, y: 0.20 },
+          cp2:  { x: 0.20, y: 0.25 },
+          to:   { x: 0.00, y: 1.00 },
+          style: 'main' },
+      ],
+      arrows: [
+        { seg: 1, t: 0.5 },  // midpoint of downbeat
+        { seg: 2, t: 0.5 },  // midpoint of 1→2 arc
+        { seg: 3, t: 0.5 },  // midpoint of 2→3 arc
+      ]
+    },
+  ];
+
   // Color palettes
   const palettes = [
     { name: 'Warm',  label: '\u{1F7E0} Warm',  colors: ['#fc5c7d','#f0c27f','#ff6b6b','#ffd93d'] },
@@ -653,6 +766,8 @@
   const countdownNumber = document.getElementById('countdownNumber');
   const crosshair = document.getElementById('crosshair');
   const soundBtn = document.getElementById('soundBtn');
+  const guideBtn = document.getElementById('guideBtn');
+  const guidePatternLabel = document.getElementById('guidePatternLabel');
   const tempoDisplay = document.getElementById('tempoDisplay');
   const tempoBpm = document.getElementById('tempoBpm');
   const tempoName = document.getElementById('tempoName');
@@ -711,6 +826,7 @@
         controls.classList.add('visible');
         indicator.classList.add('visible');
         tempoDisplay.classList.add('visible');
+        if (showGuide) guidePatternLabel.classList.add('visible');
         startScreen.style.display = 'none';
       }, 500);
 
@@ -1105,6 +1221,178 @@
     }
   }
 
+  // --- Guide pattern rendering ---
+
+  function getGuideRect() {
+    // Place guide on the right 38% of screen, vertically centered
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const gw = w * 0.34;
+    const gh = h * 0.52;
+    const gx = w * 0.60;                     // left edge of guide area
+    const gy = (h - gh) / 2 + h * 0.05;      // vertically centered, nudged slightly down
+    return { x: gx, y: gy, w: gw, h: gh };
+  }
+
+  function guideToScreen(nx, ny, rect) {
+    return {
+      x: rect.x + nx * rect.w,
+      y: rect.y + ny * rect.h
+    };
+  }
+
+  // Evaluate a point along a cubic bezier at parameter t
+  function cubicBezierPoint(p0, cp1, cp2, p1, t) {
+    const mt = 1 - t;
+    return {
+      x: mt*mt*mt*p0.x + 3*mt*mt*t*cp1.x + 3*mt*t*t*cp2.x + t*t*t*p1.x,
+      y: mt*mt*mt*p0.y + 3*mt*mt*t*cp1.y + 3*mt*t*t*cp2.y + t*t*t*p1.y,
+    };
+  }
+
+  // Tangent of cubic bezier at t
+  function cubicBezierTangent(p0, cp1, cp2, p1, t) {
+    const mt = 1 - t;
+    return {
+      x: 3*mt*mt*(cp1.x-p0.x) + 6*mt*t*(cp2.x-cp1.x) + 3*t*t*(p1.x-cp2.x),
+      y: 3*mt*mt*(cp1.y-p0.y) + 6*mt*t*(cp2.y-cp1.y) + 3*t*t*(p1.y-cp2.y),
+    };
+  }
+
+  function renderGuidePattern() {
+    if (!showGuide) return;
+
+    const pattern = guidePatternDefs[guideMode];
+    if (!pattern) return;
+
+    const rect = getGuideRect();
+
+    drawCtx.save();
+
+    // Subtle background panel
+    drawCtx.fillStyle = 'rgba(10, 10, 20, 0.25)';
+    drawCtx.strokeStyle = 'rgba(240, 194, 127, 0.12)';
+    drawCtx.lineWidth = 1;
+    const pad = 20;
+    const r = 12;
+    const bx = rect.x - pad, by = rect.y - pad, bw = rect.w + pad * 2, bh = rect.h + pad * 2;
+    drawCtx.beginPath();
+    drawCtx.moveTo(bx + r, by);
+    drawCtx.lineTo(bx + bw - r, by);
+    drawCtx.arcTo(bx + bw, by, bx + bw, by + r, r);
+    drawCtx.lineTo(bx + bw, by + bh - r);
+    drawCtx.arcTo(bx + bw, by + bh, bx + bw - r, by + bh, r);
+    drawCtx.lineTo(bx + r, by + bh);
+    drawCtx.arcTo(bx, by + bh, bx, by + bh - r, r);
+    drawCtx.lineTo(bx, by + r);
+    drawCtx.arcTo(bx, by, bx + r, by, r);
+    drawCtx.closePath();
+    drawCtx.fill();
+    drawCtx.stroke();
+
+    // Draw path segments
+    for (const seg of pattern.paths) {
+      const isPrep = seg.style === 'prep';
+      drawCtx.lineWidth = isPrep ? 2 : 3;
+      drawCtx.lineCap = 'round';
+      drawCtx.lineJoin = 'round';
+
+      if (isPrep) {
+        drawCtx.setLineDash([8, 6]);
+        drawCtx.strokeStyle = 'rgba(240, 194, 127, 0.3)';
+      } else {
+        drawCtx.setLineDash([]);
+        drawCtx.strokeStyle = 'rgba(240, 194, 127, 0.55)';
+      }
+
+      const from = guideToScreen(seg.from.x, seg.from.y, rect);
+      const to = guideToScreen(seg.to.x, seg.to.y, rect);
+
+      drawCtx.beginPath();
+      if (seg.type === 'line') {
+        drawCtx.moveTo(from.x, from.y);
+        drawCtx.lineTo(to.x, to.y);
+      } else if (seg.type === 'cubic') {
+        const c1 = guideToScreen(seg.cp1.x, seg.cp1.y, rect);
+        const c2 = guideToScreen(seg.cp2.x, seg.cp2.y, rect);
+        drawCtx.moveTo(from.x, from.y);
+        drawCtx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, to.x, to.y);
+      }
+      drawCtx.stroke();
+
+      // Glow for main strokes
+      if (!isPrep) {
+        drawCtx.lineWidth = 10;
+        drawCtx.strokeStyle = 'rgba(240, 194, 127, 0.08)';
+        drawCtx.stroke();
+      }
+    }
+
+    drawCtx.setLineDash([]);
+
+    // Draw directional arrows on path segments
+    for (const arrow of pattern.arrows) {
+      const seg = pattern.paths[arrow.seg];
+      if (!seg) continue;
+
+      let pos, tangent;
+      if (seg.type === 'line') {
+        const from = guideToScreen(seg.from.x, seg.from.y, rect);
+        const to = guideToScreen(seg.to.x, seg.to.y, rect);
+        pos = { x: from.x + (to.x - from.x) * arrow.t, y: from.y + (to.y - from.y) * arrow.t };
+        tangent = { x: to.x - from.x, y: to.y - from.y };
+      } else if (seg.type === 'cubic') {
+        const p0 = guideToScreen(seg.from.x, seg.from.y, rect);
+        const c1 = guideToScreen(seg.cp1.x, seg.cp1.y, rect);
+        const c2 = guideToScreen(seg.cp2.x, seg.cp2.y, rect);
+        const p1 = guideToScreen(seg.to.x, seg.to.y, rect);
+        pos = cubicBezierPoint(p0, c1, c2, p1, arrow.t);
+        tangent = cubicBezierTangent(p0, c1, c2, p1, arrow.t);
+      }
+
+      // Normalize tangent and draw arrowhead
+      const len = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
+      if (len < 0.01) continue;
+      const tx = tangent.x / len;
+      const ty = tangent.y / len;
+      const arrowSize = 8;
+      // Perpendicular
+      const px = -ty;
+      const py = tx;
+
+      drawCtx.beginPath();
+      drawCtx.moveTo(pos.x + tx * arrowSize, pos.y + ty * arrowSize);
+      drawCtx.lineTo(pos.x - tx * arrowSize * 0.5 + px * arrowSize * 0.6, pos.y - ty * arrowSize * 0.5 + py * arrowSize * 0.6);
+      drawCtx.lineTo(pos.x - tx * arrowSize * 0.5 - px * arrowSize * 0.6, pos.y - ty * arrowSize * 0.5 - py * arrowSize * 0.6);
+      drawCtx.closePath();
+      drawCtx.fillStyle = 'rgba(240, 194, 127, 0.6)';
+      drawCtx.fill();
+    }
+
+    // Draw beat labels
+    for (const beat of pattern.beats) {
+      const pos = guideToScreen(beat.x, beat.y, rect);
+
+      // Ictus dot
+      drawCtx.beginPath();
+      drawCtx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+      drawCtx.fillStyle = 'rgba(252, 92, 125, 0.7)';
+      drawCtx.fill();
+      drawCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      drawCtx.lineWidth = 1.5;
+      drawCtx.stroke();
+
+      // Beat number label below
+      drawCtx.font = 'bold 16px "Playfair Display", serif';
+      drawCtx.textAlign = 'center';
+      drawCtx.textBaseline = 'top';
+      drawCtx.fillStyle = 'rgba(240, 194, 127, 0.85)';
+      drawCtx.fillText(beat.label, pos.x, pos.y + 12);
+    }
+
+    drawCtx.restore();
+  }
+
   function checkDirectionChange(screenX, screenY) {
     const now = performance.now();
 
@@ -1377,6 +1665,9 @@
 
     drawCtx.clearRect(0, 0, w, h);
 
+    // Draw conducting guide pattern (behind everything)
+    renderGuidePattern();
+
     // Draw ghost pattern (average of recent measures) behind live trail
     renderGhostPattern();
 
@@ -1500,6 +1791,25 @@
       soundMode = 0;
       soundBtn.textContent = 'Sound: Click';
     }
+  });
+
+  guideBtn.addEventListener('click', () => {
+    // Cycle: 4/4 → 3/4 → Off → 4/4 ...
+    if (showGuide && guideMode < guidePatternDefs.length - 1) {
+      guideMode++;
+    } else if (showGuide) {
+      showGuide = false;
+      guideBtn.textContent = 'Guide: Off';
+      guidePatternLabel.classList.remove('visible');
+      return;
+    } else {
+      showGuide = true;
+      guideMode = 0;
+    }
+    const pat = guidePatternDefs[guideMode];
+    guideBtn.textContent = 'Guide: ' + pat.name;
+    guidePatternLabel.textContent = pat.label;
+    guidePatternLabel.classList.add('visible');
   });
 
   clearBtn.addEventListener('click', () => {
